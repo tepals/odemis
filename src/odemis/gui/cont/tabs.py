@@ -335,13 +335,12 @@ class SecomStreamsTab(Tab):
             (
                 panel.btn_secom_view_br,
                 (panel.vp_secom_br, panel.lbl_secom_view_br)),
-            (
-                panel.btn_secom_view_br,
-                (panel.vp_flim_chronograph, panel.lbl_secom_view_br)),
-            (
-                panel.btn_secom_overview,
-                (panel.vp_overview_sem, panel.lbl_secom_overview)),
         ])
+        if main_data.time_correlator:
+            buttons[panel.btn_secom_view_br] = (panel.vp_flim_chronograph, panel.lbl_secom_view_br)
+
+        # Add overview at the end
+        buttons[panel.btn_secom_overview] = (panel.vp_overview_sem, panel.lbl_secom_overview)
 
         self._view_selector = viewcont.ViewButtonController(
             tab_data,
@@ -511,7 +510,7 @@ class SecomStreamsTab(Tab):
                  })
             ])
             
-            if main_data.time_correlator:
+            if main_data.time_correlator is not None:
                 vpv[viewports[4]] = {
                   "name": "FLIM",
                   "stage": main_data.stage,

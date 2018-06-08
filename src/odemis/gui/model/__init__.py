@@ -453,22 +453,22 @@ class LiveViewGUIData(MicroscopyGUIData):
             if main.tc_detector:  # Can even show live settings
                 tools.add(TOOL_SPOT)
 
-        self.tool = IntEnumerated(TOOL_NONE, choices=tools)
+                # The SpotConfocalstream, used to control spot mode.
+                # It is set at start-up by the tab controller.
+                self.spotStream = None
 
-        # The SpotConfocalstream, used to control spot mode.
-        # It is set at start-up by the tab controller.
-        self.spotStream = None
+                # Component to which the (relative) ROIs and spot position refer to for
+                # the field-of-view.
+                self.fovComp = None
 
-        # Component to which the (relative) ROIs and spot position refer to for
-        # the field-of-view.
-        self.fovComp = None
-
-        self.roa = model.TupleContinuous(acqstream.UNDEFINED_ROI,
-                                         range=((0, 0, 0, 0), (1, 1, 1, 1)),
-                                         cls=(int, long, float))
+                self.roa = model.TupleContinuous(acqstream.UNDEFINED_ROI,
+                                                 range=((0, 0, 0, 0), (1, 1, 1, 1)),
+                                                 cls=(int, long, float))
 
         # The position of the spot. Two floats 0->1. (None, None) if undefined.
         self.spotPosition = model.TupleVA((None, None))
+
+        self.tool = IntEnumerated(TOOL_NONE, choices=tools)
 
         # Represent the global state of the microscopes. Mostly indicating
         # whether optical/sem streams are active.
