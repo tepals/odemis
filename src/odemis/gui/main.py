@@ -21,6 +21,47 @@ see http://www.gnu.org/licenses/.
 
 from __future__ import division
 
+import wx
+import sys
+if wx.MAJOR_VERSION == 3:
+    # ComboBox is now in .adv
+    import wx.combo
+    wx.adv = wx.combo
+    sys.modules["wx.adv"] = wx.combo
+
+    import wx.xrc
+    wx.xrc.XmlResource = wx.xrc.EmptyXmlResource
+
+    wx._Image_orig = wx.Image
+
+    class ImageClever(wx.Image):
+
+        def __new__(cls, *args, **kwargs):
+            if isinstance(args[0], file):
+                return wx.ImageFromStream(*args)
+            return super(ImageClever, cls).__new__(cls, *args, **kwargs)
+
+
+    class BitmapClever(wx.Bitmap):
+
+        def __new__(cls, *args, **kwargs):
+            if isinstance(args[0], wx._core.Image):
+                return wx.BitmapFromImage(*args)
+            elif len(args) == 2 and isinstance(args[0], int):
+                return wx.EmptyBitmap(*args)
+            return super(BitmapClever, cls).__new__(cls, *args, **kwargs)
+
+    class IconClever(wx.Icon):
+
+        def __new__(cls, *args, **kwargs):
+            if isinstance(args[0], wx._core.Bitmap):
+                return wx.IconFromBitmap(*args)
+            return super(IconClever, cls).__new__(cls, *args, **kwargs)
+
+    wx.Image = ImageClever
+    wx.Bitmap = BitmapClever
+    wx.Icon = IconClever
+
 import Pyro4
 import Pyro4.errors
 import argparse
@@ -33,10 +74,9 @@ from odemis.gui.cont.menu import MenuController
 from odemis.gui.util import call_in_wx_main
 from odemis.gui.xmlh import odemis_get_resources
 from odemis.util import driver
-import sys
 import threading
 import traceback
-import wx
+
 from wx.lib.pubsub import pub
 
 import odemis.gui.cont.tabs as tabs
