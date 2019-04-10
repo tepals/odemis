@@ -250,7 +250,11 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
         if rng_focus:
             rng = (max(rng[0], rng_focus[0]), min(rng[1], rng_focus[1]))
 
-        max_step = (rng[1] - rng[0]) / 2
+        max_step = (rng[1] - rng[0]) / 2  # TODO this implies that it can move by half the range, this only work if
+        # you're starting in the middle of the range.
+        # current_pos = focus.position.value["z"]
+        # max_step = min(current_pos - rng[0], rng[1] - current_pos)
+        # TODO handle cases when the stage is at the min or max rng position
         if max_step <= 0:
             raise ValueError("Unexpected focus range %s" % (rng,))
 
@@ -275,7 +279,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             logging.debug("Using SEM method to estimate focus")
             Measure = MeasureSEMFocus
 
-        step_factor = 2 ** 7
+        step_factor = 2 ** 7  # TODO why 2 ** 7?
         if good_focus is not None:
             current_pos = focus.position.value['z']
             image = AcquireNoBackground(detector, dfbkg, timeout)
@@ -283,6 +287,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             logging.debug("Focus level at %f is %f", current_pos, fm_current)
             focus_levels[current_pos] = fm_current
 
+            logging.info("moving to {}".format(good_focus))
             focus.moveAbsSync({"z": good_focus})
             good_focus = focus.position.value["z"]
             image = AcquireNoBackground(detector, dfbkg, timeout)
@@ -294,6 +299,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             if fm_good < fm_current:
                 # Move back to current position if good_pos is not that good
                 # after all
+                logging.info("moving to {}".format(current_pos))
                 focus.moveAbsSync({"z": current_pos})
                 # it also means we are pretty close
             step_factor = 2 ** 4
@@ -335,6 +341,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             if not max_reached and right in focus_levels:
                 fm_right = focus_levels[right]
             else:
+                logging.info("moving to {}".format(right))
                 focus.moveAbsSync({"z": right})
                 right = focus.position.value["z"]
                 last_pos = right
@@ -349,6 +356,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             if not max_reached and left in focus_levels:
                 fm_left = focus_levels[left]
             else:
+                logging.info("moving to {}".format(left))
                 focus.moveAbsSync({"z": left})
                 left = focus.position.value["z"]
                 last_pos = left
@@ -392,7 +400,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
                               step_factor, best_pos, rng)
                 if step_factor <= 8:
                     max_reached = True  # Force re-checking data
-
+            logging.info("moving to {}".format(best_pos))
             focus.moveAbsSync({"z": best_pos})
             step_cntr += 1
 
@@ -411,6 +419,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
 
     except CancelledError:
         # Go to the best position known so far
+        logging.info("moving to {}".format(best_pos))
         focus.moveAbsSync({"z": best_pos})
     finally:
         with future._autofocus_lock:

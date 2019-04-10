@@ -54,6 +54,7 @@ CONFIG_BUS_TWO_CL = {"x":(1, 1, True), "y":(2, 1, True)}
 
 # A stage with one controller and 2 axes
 CONFIG_BUS_E725 = {"x": [None, 1, True], "y": [None, 2, True]}
+CONFIG_BUS_E709 = {"z": [None, 3, True]}
 
 if TEST_NOHW:
     CLASS = pigcs.FakeBus  # (serial controller) simulator
@@ -73,6 +74,7 @@ KWARGS_IP = {"name": "test", "role": "stage", "port": "autoip", "axes": CONFIG_B
 KWARGS_TWO_IP = {"name": "test", "role": "stage2d", "port": "autoip", "axes": CONFIG_BUS_TWO}
 
 KWARGS_E725 = {"name": "test", "role": "stage", "port": "autoip", "axes": CONFIG_BUS_E725}
+KWARGS_E709 = {"name": "test", "role": "stage", "port": "autoip", "axes": CONFIG_BUS_E709}
 
 
 # @skip("faster")
@@ -619,6 +621,15 @@ class TestActuatorE725(TestActuator):
 
         self.kwargs = KWARGS_E725
         self.kwargs_two = KWARGS_E725
+
+
+class TestActuatorE709(TestActuator):
+    def setUp(self):
+        if TEST_NOHW:
+            self.skipTest("E709 actuator has not simulator")
+
+        self.kwargs = KWARGS_E709
+        self.kwargs_two = KWARGS_E709
 
 
 if __name__ == "__main__":

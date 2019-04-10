@@ -481,7 +481,7 @@ class Detector(model.Detector):
             if self.parent._focus:
                 # apply the defocus
                 pos = self.parent._focus.position.value['z']
-                dist = abs(pos - self.parent._focus._good_focus) * 1e4
+                dist = abs(pos - self.parent._focus.good_focus.value) * 1e4
                 sim_img = ndimage.gaussian_filter(sim_img, sigma=dist)
 
             # update fake output metadata
@@ -609,6 +609,11 @@ class EbeamFocus(model.Actuator):
         self._position = {"z": self._good_focus}
 
         model.Actuator.__init__(self, name, role, axes=axes_def, **kwargs)
+
+        # Defines position where the image of the SEM is in focus. Can be overwritten, but isn't necessary.
+        # Can be useful to overwrite for testing combinations of optical and SEM focusing procedures.
+        self.good_focus = model.VigilantAttribute(self._good_focus,
+                                    unit="m", readonly=False)
 
         # RO, as to modify it the client must use .moveRel() or .moveAbs()
         self.position = model.VigilantAttribute(
