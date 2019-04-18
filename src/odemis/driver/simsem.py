@@ -612,8 +612,7 @@ class EbeamFocus(model.Actuator):
 
         # Defines position where the image of the SEM is in focus. Can be overwritten, but isn't necessary.
         # Can be useful to overwrite for testing combinations of optical and SEM focusing procedures.
-        self.good_focus = model.VigilantAttribute(self._good_focus,
-                                    unit="m", readonly=False)
+        self.good_focus = model.VigilantAttribute(self._good_focus, unit="m", readonly=False)
 
         # RO, as to modify it the client must use .moveRel() or .moveAbs()
         self.position = model.VigilantAttribute(

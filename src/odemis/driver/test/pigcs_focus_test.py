@@ -1,16 +1,22 @@
+from __future__ import division
 import logging
 import os
 import time
 import unittest
 
 import numpy
+import scipy.misc
+
+import cv2
+import matplotlib.pyplot as plt
 
 import odemis
 from odemis import model
 from odemis.util import timeout
 
 from odemis.acq import align
-from odemis.driver import pigcs, simulated
+from odemis.dataio import hdf5 as h5, tiff
+from odemis.driver import pigcs, ueye
 
 
 class TestFocus(unittest.TestCase):
@@ -50,6 +56,15 @@ class TestFocus(unittest.TestCase):
         pass
 
 
+class TestDiagnosticCam(unittest.TestCase):
+    def setUp(self):
+        # self.focus = pigcs.Bus("test", "focus", port="/dev/ttyUSB0", axes={"z": [None, "Z", True]})
+        self.diagnostic_cam = ueye.Camera(name="camera", role="ccd")
+
+    def test_diagnostic(self):
+        self.diagnostic_cam.SetFrameRate(2)
+
+
 # logging.basicConfig(format=" - %(levelname)s \t%(message)s")
 logging.getLogger().setLevel(logging.INFO)
 # _frm = "%(asctime)s  %(levelname)-7s %(module)-15s: %(message)s"
@@ -85,9 +100,11 @@ class TestAutofocus(unittest.TestCase):
 
         # The good focus positions are at the start up positions
         # cls.ofocus.moveAbs({"z": 0}).result()
-        good_focus = 0
+        # good_focus = numpy.random.randint(100) * 1e-6
+        good_focus = 40e-6
         cls.diagnostic_cam.good_focus.value = good_focus
-        cls._opt_good_focus = good_focus  # cls.ofocus.position.value["z"]
+        cls._opt_good_focus = good_focus
+        # cls._opt_good_focus = cls.ofocus.position.value["z"]
 
     @classmethod
     def tearDownClass(cls):
@@ -111,12 +128,40 @@ class TestAutofocus(unittest.TestCase):
         self.ofocus.moveAbs({"z": center_position}).result()
         numpy.testing.assert_allclose(self.ofocus.position.value["z"], center_position, atol=1e-7)
 
-        time.sleep(4)
+        # time.sleep(4)
         self.diagnostic_cam.exposureTime.value = self.diagnostic_cam.exposureTime.range[0]
         future_focus = align.AutoFocus(self.diagnostic_cam, None, self.ofocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         logging.info("found focus at {}".format(foc_pos))
         logging.info("good focus at {}".format(self._opt_good_focus))
         # todo check the minimum step we want to move.
-        numpy.testing.assert_allclose(foc_pos, self._opt_good_focus, atol=1e-6)
+        numpy.testing.assert_allclose(foc_pos, self._opt_good_focus, atol=0.5e-6)
         self.assertGreater(foc_lev, 0)
+
+    @unittest.skip('needs hardware')
+    def test_autofocus_optical_hardware(self):
+        """
+        Test AutoFocus on CCD
+        """
+        # Move the stage so that the image is out of focus
+        center_position = 42e-6
+        self.ofocus.moveAbs({"z": center_position}).result()
+        numpy.testing.assert_allclose(self.ofocus.position.value["z"], center_position, atol=1e-7)
+
+        time.sleep(3)
+        future_focus = align.AutoFocus(self.diagnostic_cam, None, self.ofocus)
+        foc_pos, foc_lev = future_focus.result(timeout=900)
+
+        logging.info("found focus at {}".format(foc_pos))
+        logging.info("good focus at {}".format(self._opt_good_focus))
+        self.assertGreater(foc_lev, 0)
+
+    @unittest.skip("not a real unittest")
+    def test_loop(self):
+        f = h5.h5py.File(os.path.join("/home/pals/Documents/mb autofocus images", "autofocus_testimages.h5"), "w")
+        for k in range(100):
+            self.ofocus.moveAbs({"z": k * 1e-6}).result()
+            image = align.autofocus.getNextImage(self.diagnostic_cam)
+            f[str(k)] = image
+            # h5.export(os.path.join("/home/pals/Documents/mb autofocus images", str(k) + ".h5"), image)
+        f.close()
