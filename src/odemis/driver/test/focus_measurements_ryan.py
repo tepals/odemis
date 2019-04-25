@@ -50,7 +50,7 @@ def measure_tenv_focus(image):
     sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=5)
     sobely = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=5)
     sobel_image = sobelx ** 2 + sobely ** 2
-    return numpy.std(sobel_image) ** 2
+    return sobel_image.var()
 
 
 def measure_teng_focus(image):
@@ -124,14 +124,18 @@ def measure_sem_focus(image):
 
 
 def test_focus_method():
+    # 5.14330601692
     images = h5.read_data("/home/pals/Documents/mb autofocus images/autofocus_testimages.h5")
-    measure = measure_sfrq_focus
+    measure = measure_tenv_focus
     focus_levels = []
+    import time
+    the_time = time.time()
     for idx, image in zip(INDICES, images):
         image = scipy.misc.imresize(image, (int(image.shape[0] / 2), int(image.shape[1] / 2)))
         focus = measure(image)
         focus_levels.append(focus)
         print(idx)
+    print(time.time() - the_time)
     sorted_focus = [x for y, x in sorted(zip(INDICES, focus_levels))]
     sorted_focus_blue = [k / max(sorted_focus) for k in sorted_focus]
     sorted_focus_orange = [(k - min(sorted_focus)) / (max(sorted_focus) - min(sorted_focus)) for k
