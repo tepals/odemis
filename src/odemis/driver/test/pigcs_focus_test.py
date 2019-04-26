@@ -13,6 +13,10 @@ from odemis.driver import pigcs, ueye
 from odemis.util import timeout
 
 
+TEST_NOHW = (os.environ.get("TEST_NOHW", "0") != "0")  # Default to Hw testing
+TEST_NOHW = True
+
+
 class TestStage(unittest.TestCase):
     def setUp(self):
         self.focus = pigcs.Bus("test", "focus", port="/dev/ttyUSB0", axes={"z": [None, "Z", True]})
@@ -147,6 +151,9 @@ class TestAutofocusHW(unittest.TestCase):
         #     logging.error(str(exp))
         #     raise
 
+        if TEST_NOHW:
+            raise unittest.SkipTest('No HW present. Skipping tests.')
+
         # find components by their role
         cls.diagnostic_cam = model.getComponent(role="diagnostic-ccd")
         cls.stage = model.getComponent(role="stage")
@@ -179,7 +186,7 @@ class TestAutofocusHW(unittest.TestCase):
 
         logging.info("found focus at {}".format(foc_pos))
         logging.info("good focus at {}".format(self._optimal_focus))
-        self.assertGreater(foc_lev, 0)
+        numpy.testing.assert_allclose(foc_pos, self._optimal_focus, atol=0.5e-6)
 
     def test_autofocus_optical_hardware_multiple_runs(self):
         """

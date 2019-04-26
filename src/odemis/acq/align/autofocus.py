@@ -127,6 +127,29 @@ def MeasureSpotsFocus(image):
     return sobel_image.var()
 
 
+def Measure1d(image):
+    def gauss(x, *p):
+        a, b, c, d = p
+        y = a * numpy.exp(-numpy.power((x - b), 2.) / (2. * c ** 2.)) + d
+        return y
+
+    signal = numpy.sum(image, axis=0)
+    x = numpy.arange(len(signal))
+    p_initial = [max(signal), numpy.argmax(signal), 100, min(signal)]
+
+    # Use curve_fit to fit the gauss function to our data. Use the
+    # unperturbed p_initial as our initial guess.
+    from scipy.optimize import curve_fit
+    popt, pcov = curve_fit(gauss, x, signal, p0=p_initial)
+    y_fit = gauss(x, *popt)
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.plot(x, signal, '.')
+    ax.plot(x, y_fit)
+    fig.savefig("/home/pals/Documents/1dfocus/2/1d_focus_{}".format(time.ctime()), dpi=300)
+    return 1/popt[2]
+
+
 def getNextImage(det, timeout=None):
     """
     Acquire one image from the given detector
@@ -1000,23 +1023,9 @@ def AutoFocusSpectrometer(spectrograph, focuser, detectors, selector=None, strea
 
 
 def CLSpotsAutoFocus(detector, focus, emt=None, dfbkg=None, good_focus=None, rng_focus=None):
-    detector.exposureTime.value = 0.01
+    detector.exposureTime.value = 0.01  # detector.SetExposure(0.01)
     # Create ProgressiveFuture and update its state to RUNNING
-    est_start = time.time() + 0.1
-    f = model.ProgressiveFuture(start=est_start, end=est_start + estimateAutoFocusTime(detector, emt))
-    f._autofocus_state = RUNNING
-    f._autofocus_lock = threading.Lock()
-    f.task_canceller = _CancelAutoFocus
-
-    def do_binary_wrapper(f, detector, emt, focus, dfbkg, good_focus, rng_focus):
-        pos, foc = _DoBinaryFocus(f, detector, emt, focus, dfbkg, good_focus, rng_focus)
-        # if foc < 0.3:
-        #     pos, foc = _DoExhaustiveFocus(f, detector, emt, focus, dfbkg, good_focus, rng_focus)
-        return pos, foc
-
-    executeAsyncTask(f, do_binary_wrapper,
-                     args=(f, detector, emt, focus, dfbkg, good_focus, rng_focus))
-
+    f = AutoFocus(detector, emt, focus, dfbkg, good_focus, rng_focus)
     return f
 
 
