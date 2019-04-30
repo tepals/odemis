@@ -315,7 +315,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             logging.debug("Using SEM method to estimate focus")
             Measure = MeasureSEMFocus
 
-        step_factor = 2 ** 7  # TODO why 2 ** 7?
+        step_factor = 2 ** 7
         if good_focus is not None:
             current_pos = focus.position.value['z']
             image = AcquireNoBackground(detector, dfbkg, timeout)
@@ -442,7 +442,6 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
                     best_pos = rng[0]
                 focus.moveAbsSync({"z": best_pos})
                 logging.info("moved to be {} focus {}".format(best_pos, best_fm))
-                last_pos = best_pos
             step_cntr += 1
 
         worst_fm = min(focus_levels.values())
@@ -491,7 +490,7 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
             CancelledError if cancelled
             IOError if procedure failed
     """
-    logging.info("Starting exhaustive autofocus on detector %s...", detector.name)
+    logging.debug("Starting exhaustive autofocus on detector %s...", detector.name)
 
     try:
         # Big timeout, most important being that it's shorter than eternity
@@ -555,7 +554,7 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         # we know that upper_bound is excluded but: 1. realistically the best focus
         # position would not be there 2. the upper_bound - orig_pos range is not
         # expected to be precisely a multiple of the step anyway
-        for next_pos in numpy.linspace(orig_pos, upper_bound - dof, (upper_bound - orig_pos) / step + 1):
+        for next_pos in numpy.linspace(orig_pos, upper_bound, (upper_bound - orig_pos) / step, endpoint=False):
             focus.moveAbsSync({"z": next_pos})
             image = AcquireNoBackground(detector, dfbkg, timeout)
             new_fm = Measure(image)
@@ -575,8 +574,8 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         # if nothing was found return to original position and start going
         # downwards
         focus.moveAbsSync({"z": orig_pos})  # TODO does this do anything?
-        steps = max((orig_pos - step - lower_bound) / step, 0)  # Take 0 steps if orig_pos is too close to lower_bound
-        for next_pos in numpy.linspace(orig_pos - step, lower_bound + dof, steps):
+        num = max((orig_pos - lower_bound) / step, 0)  # Take 0 steps if orig_pos is too close to lower_bound
+        for next_pos in numpy.linspace(orig_pos - step, lower_bound, num, endpoint=False):
             focus.moveAbsSync({"z": next_pos})
             image = AcquireNoBackground(detector, dfbkg, timeout)
             new_fm = Measure(image)
@@ -1031,10 +1030,25 @@ def AutoFocusSpectrometer(spectrograph, focuser, detectors, selector=None, strea
     return f
 
 
-def CLSpotsAutoFocus(detector, focus, emt=None, dfbkg=None, good_focus=None, rng_focus=None):
-    detector.exposureTime.value = 0.01  # detector.SetExposure(0.01)
+def CLSpotsAutoFocus(detector, focus, emt=None, dfbkg=None, good_focus=None, rng_focus=None, method=MTD_EXHAUSTIVE):
+    detector.exposureTime.value = 0.01
     # Create ProgressiveFuture and update its state to RUNNING
-    f = AutoFocus(detector, emt, focus, dfbkg, good_focus, rng_focus)
+    est_start = time.time() + 0.1
+    f = model.ProgressiveFuture(start=est_start,
+                                end=est_start + estimateAutoFocusTime(detector, emt))
+    f._autofocus_state = RUNNING
+    f._autofocus_lock = threading.Lock()
+    f.task_canceller = _CancelAutoFocus
+
+    # Run in separate thread
+    if method == MTD_EXHAUSTIVE:
+        autofocus_fn = _DoExhaustiveFocus
+    elif method == MTD_BINARY:
+        autofocus_fn = _DoBinaryFocus
+    else:
+        raise ValueError("Unknown autofocus method")
+    executeAsyncTask(f, autofocus_fn,
+                     args=(f, detector, emt, focus, dfbkg, good_focus, rng_focus))
     return f
 
 

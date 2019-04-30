@@ -235,13 +235,12 @@ class Camera(model.DigitalCamera):
         exp = timer.period
         metadata[model.MD_ACQ_DATE] = time.time() - exp
         metadata[model.MD_EXP_TIME] = exp
-        logging.info("Generating new fake image of shape %s", gen_img.shape)
+        logging.debug("Generating new fake image of shape %s", gen_img.shape)
 
         if self._focus:
             # apply the defocus
             pos = self._focus.position.value['z']
-            logging.info("good focus {}".format(self.good_focus.value))
-            dist = abs(pos - self.good_focus.value) * 100e4  # todo changed from 1e4 for debugging
+            dist = abs(pos - self.good_focus.value) * 100e4
             logging.debug("Focus dist = %g", dist)
             img = ndimage.gaussian_filter(gen_img, sigma=dist)
         else:
