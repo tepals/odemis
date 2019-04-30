@@ -436,6 +436,10 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
                     rough_search = False  # Force re-checking data
 
             if last_pos != best_pos:
+                if rng[1] < best_pos < rng[1] + dof:
+                    best_pos = rng[1]
+                elif rng[0] - dof < best_pos < rng[0]:
+                    best_pos = rng[0]
                 focus.moveAbsSync({"z": best_pos})
                 logging.info("moved to be {} focus {}".format(best_pos, best_fm))
                 last_pos = best_pos
@@ -515,8 +519,12 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         # TODO: is this working as expected? Alternatively, we could check
         # MD_DET_TYPE.
         if len(detector.shape) > 1:
-            logging.debug("Using Optical method to estimate focus")
-            Measure = MeasureOpticalFocus
+            if detector.role == 'diagnostic-ccd':
+                logging.debug("Using Spot method to estimate focus")
+                Measure = MeasureSpotsFocus
+            else:
+                logging.debug("Using Optical method to estimate focus")
+                Measure = MeasureOpticalFocus
         else:
             logging.debug("Using SEM method to estimate focus")
             Measure = MeasureSEMFocus
@@ -547,7 +555,7 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         # we know that upper_bound is excluded but: 1. realistically the best focus
         # position would not be there 2. the upper_bound - orig_pos range is not
         # expected to be precisely a multiple of the step anyway
-        for next_pos in numpy.arange(orig_pos, upper_bound, step):
+        for next_pos in numpy.linspace(orig_pos, upper_bound - dof, (upper_bound - orig_pos) / step + 1):
             focus.moveAbsSync({"z": next_pos})
             image = AcquireNoBackground(detector, dfbkg, timeout)
             new_fm = Measure(image)
@@ -566,8 +574,9 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
 
         # if nothing was found return to original position and start going
         # downwards
-        focus.moveAbsSync({"z": orig_pos})
-        for next_pos in numpy.arange(orig_pos - step, lower_bound, -step):
+        focus.moveAbsSync({"z": orig_pos})  # TODO does this do anything?
+        steps = max((orig_pos - step - lower_bound) / step, 0)  # Take 0 steps if orig_pos is too close to lower_bound
+        for next_pos in numpy.linspace(orig_pos - step, lower_bound + dof, steps):
             focus.moveAbsSync({"z": next_pos})
             image = AcquireNoBackground(detector, dfbkg, timeout)
             new_fm = Measure(image)
