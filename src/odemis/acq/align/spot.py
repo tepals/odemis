@@ -331,7 +331,7 @@ def FindSpot(image, sensitivity_limit=100):
     return max_pos
 
 
-def FindGridSpots(image, repetition):
+def FindGridSpots(image, repetition, return_shear=False):
     """
     Find a grid of spots in an image.
 
@@ -371,8 +371,10 @@ def FindGridSpots(image, repetition):
     pos_sorted = spot_positions[ii.ravel(), :]
     transformation = AffineTransform.from_pointset(grid, pos_sorted)
     spot_coordinates = transformation(grid)
-
-    return spot_coordinates, translation, transformation.scale, transformation.rotation
+    if return_shear:
+        return spot_coordinates, translation, transformation.scale, transformation.rotation, transformation.shear
+    else:
+        return spot_coordinates, translation, transformation.scale, transformation.rotation
 
 
 def CropFoV(ccd, dfbkg=None):

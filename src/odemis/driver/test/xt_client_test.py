@@ -28,6 +28,9 @@ import time
 import unittest
 
 from odemis.driver import xt_client
+from odemis.driver.xt_client import detector2ChannelName
+from odemis.model import ProgressiveFuture
+from odemis.util import almost_equal
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,7 +42,7 @@ CONFIG_STAGE = {"name": "stage", "role": "stage",
                 "inverted": ["x"],
                 }
 CONFIG_FOCUS = {"name": "focuser", "role": "ebeam-focus"}
-CONFIG_SEM = {"name": "sem", "role": "sem", "address": "PYRO:Microscope@localhost:4242",
+CONFIG_SEM = {"name": "sem", "role": "sem", "address": "PYRO:Microscope@172.16.4.4:4242",
               "children": {"scanner": CONFIG_SCANNER,
                            "focus": CONFIG_FOCUS,
                            "stage": CONFIG_STAGE,
@@ -73,7 +76,7 @@ class TestMicroscope(unittest.TestCase):
 
     def test_acquisition(self):
         """Test acquiring an image."""
-        image = self.microscope.acquire_image(channel_name='electron1')
+        image = self.microscope.get_latest_image(channel_name='electron1')
         self.assertEqual(len(image.shape), 2)
 
     @unittest.skip("Skip because the microscope stage is not used, an external stage is used.")
@@ -121,21 +124,16 @@ class TestMicroscope(unittest.TestCase):
         """
         scanfield_range = self.microscope.scanning_size_info()['range']
         new_scanfield_x = scanfield_range['x'][1]
-        new_scanfield_y = scanfield_range['y'][1]
-        self.microscope.set_scanning_size(new_scanfield_x, new_scanfield_y)
+        self.microscope.set_scanning_size(new_scanfield_x)
         self.assertEqual(self.microscope.get_scanning_size()[0], new_scanfield_x)
-        self.assertEqual(self.microscope.get_scanning_size()[1], new_scanfield_y)
         # Test it still works for different values.
         new_scanfield_x = scanfield_range['x'][0]
-        new_scanfield_y = scanfield_range['y'][0]
-        self.microscope.set_scanning_size(new_scanfield_x, new_scanfield_y)
+        self.microscope.set_scanning_size(new_scanfield_x)
         self.assertEqual(self.microscope.get_scanning_size()[0], new_scanfield_x)
-        self.assertEqual(self.microscope.get_scanning_size()[1], new_scanfield_y)
         # set value out of range
         x = 1000000  # [m]
-        y = 100
         with self.assertRaises(Exception):
-            self.microscope.set_scanning_size(x, y)
+            self.microscope.set_scanning_size(x)
 
     def test_hfov(self):
         """
@@ -242,20 +240,20 @@ class TestMicroscope(unittest.TestCase):
 
     def test_change_channel_state(self):
         """Test changing the channel state and waiting for the channel state to change."""
-        self.microscope.set_channel_state('electron1', xt_client.XT_RUN)
-        self.microscope.wait_for_state_changed(xt_client.XT_RUN, 'electron1')  # timeout is handled on the server side
-        self.assertEqual(self.microscope.get_channel_state('electron1'), xt_client.XT_RUN)
-        self.microscope.set_channel_state('electron1', xt_client.XT_STOP)
-        self.microscope.wait_for_state_changed(xt_client.XT_STOP, 'electron1')  # timeout is handled on the server side
-        self.assertEqual(self.microscope.get_channel_state('electron1'), xt_client.XT_STOP)
+        self.microscope.set_channel_state('electron1', True)
+        self.microscope.wait_for_state_changed("run", 'electron1')  # timeout is handled on the server side
+        self.assertEqual(self.microscope.get_channel_state('electron1'), "run")
+        self.microscope.set_channel_state('electron1', False)
+        self.microscope.wait_for_state_changed("stop", 'electron1')  # timeout is handled on the server side
+        self.assertEqual(self.microscope.get_channel_state('electron1'), "stop")
 
     def test_change_ccd_channel_state(self):
         """Test changing the channel state and waiting for the channel state to change for the optical channel."""
-        self.microscope.set_channel_state(name='optical4', state=xt_client.XT_RUN)
+        self.microscope.set_channel_state(name='optical4', state=True)
         self.microscope.wait_for_state_changed(xt_client.XT_RUN,
                                                name='optical4')  # timeout is handled on the server side
         self.assertEqual(self.microscope.get_channel_state(name='optical4'), xt_client.XT_RUN)
-        self.microscope.set_channel_state(name='optical4', state=xt_client.XT_STOP)
+        self.microscope.set_channel_state(name='optical4', state=False)
         self.microscope.wait_for_state_changed(xt_client.XT_STOP,
                                                name='optical4')  # timeout is handled on the server side
         self.assertEqual(self.microscope.get_channel_state(name='optical4'), xt_client.XT_STOP)
@@ -265,7 +263,7 @@ class TestMicroscope(unittest.TestCase):
         self.microscope.set_channel_state(name='optical4', state=xt_client.XT_RUN)
         self.microscope.wait_for_state_changed(xt_client.XT_RUN,
                                                name='optical4')  # timeout is handled on the server side
-        image = self.microscope.acquire_image(channel_name='optical4')
+        image = self.microscope.get_latest_image(channel_name='optical4')
         self.assertEqual(len(image.shape), 2)
 
     def test_set_beam_shift(self):
@@ -281,6 +279,220 @@ class TestMicroscope(unittest.TestCase):
         self.scanner.beamShift.value = (new_beam_shift_x, new_beam_shift_y)
         self.assertAlmostEqual((new_beam_shift_x, new_beam_shift_y), self.scanner.beamShift.value)
 
+    # @unittest.skip("Before running this test make sure it is safe to turn on the beam.")
+    # @skipIf(xt_version != 'xttoolkit', "This test needs XTToolkit to run.")
+    def test_autofocus(self):
+        """Test running and stopping autofocus."""
+        self.microscope.set_beam_power(True)
+        self.microscope.unblank_beam()
+        self.microscope.set_scan_mode("full_frame")
+        self.microscope.set_autofocusing("electron1", "run")
+        self.assertTrue(self.microscope.is_autofocusing("electron1"))
+        time.sleep(0.5)  # wait for the system to register it started running autofocus.
+        t = time.time()
+        while self.microscope.is_autofocusing("electron1"):
+            if time.time() - t > 20:
+                self.microscope.set_autofocusing("electron1", "stop")
+                raise ValueError("Stopping autofocus, taking too long. ")
+            time.sleep(0.01)
+            continue
+        self.assertFalse(self.microscope.is_autofocusing("electron1"))
+        self.microscope.set_autofocusing("electron1", "run")
+        self.microscope.set_autofocusing("electron1", "stop")
+        self.assertFalse(self.microscope.is_autofocusing("electron1"))
+        self.microscope.set_beam_power(False)
+
+    # @unittest.skip("Before running this test make sure it is safe to turn on the beam.")
+    # @skipIf(xt_version != 'xttoolkit', "This test needs XTToolkit to run.")
+    def test_autostigmator(self):
+        """Test running and stopping autostigmator."""
+        self.microscope.set_beam_power(True)
+        self.microscope.unblank_beam()
+        self.microscope.set_scan_mode("full_frame")
+        self.microscope.set_autostigmator("electron1", "run")
+        self.assertTrue(self.microscope.is_autostigmating("electron1"))
+        self.microscope.set_autostigmator("electron1", "stop")
+        self.assertFalse(self.microscope.is_autostigmating("electron1"))
+        self.microscope.set_beam_power(False)
+
+    # @unittest.skip("Before running this test make sure it is safe to turn on the beam.")
+    # @skipIf(xt_version != 'xttoolkit', "This test needs XTToolkit to run.")
+    def test_auto_contrast_brightness(self):
+        """Test running and stopping auto contrast brightness."""
+        self.microscope.set_beam_power(True)
+        self.microscope.set_scan_mode("full_frame")
+        self.microscope.set_auto_contrast_brightness("electron1", "run")
+        auto_cb_running = self.microscope.is_running_auto_contrast_brightness("electron1")
+        self.assertTrue(auto_cb_running)
+        time.sleep(0.5)  # wait for the system to register it started running auto contrast brightness.
+        t = time.time()
+        while self.microscope.is_running_auto_contrast_brightness("electron1"):
+            if time.time() - t > 20:
+                self.microscope.set_auto_contrast_brightness("electron1", "stop")
+                raise ValueError("Stopping auto contrast brightness, taking too long. ")
+            time.sleep(0.01)
+        self.microscope.set_auto_contrast_brightness("electron1", "run")
+        self.microscope.set_auto_contrast_brightness("electron1", "stop")
+        auto_cb_running = self.microscope.is_running_auto_contrast_brightness("electron1")
+        self.assertFalse(auto_cb_running)
+        self.microscope.set_beam_power(False)
+
+    def test_apply_autostigmator(self):
+        """
+        Test for the auto functionality of the apply_autostigmator.
+        Runs the apply_autostigmator multiple times and checks (using "get_stigmator()) if the found stigmator values
+        are equal each run. Checks the returned state, the return object and if an error is raised for an incorrect input state.
+        """
+        detector = 'se-detector'  # Test autostigmator only for se-detector, channel=electron1
+        ## Basic testing of the functionality of the wrapper: can it be started and canceled
+        autostigmator_return = self.scanner.applyAutoStigmator(detector)
+        time.sleep(0.5)  # Give microscope/simulator the time to update the state
+        autostigmator_state = self.microscope.is_autostigmating(detector2ChannelName[detector])
+        self.assertEqual(autostigmator_state, True)
+        self.assertIsInstance(autostigmator_return, ProgressiveFuture)
+
+        autostigmator_return.cancel()
+        time.sleep(0.5)  # Give microscope/simulator the time to update the state
+        autostigmator_state = self.microscope.is_autostigmating(detector2ChannelName[detector])
+        self.assertEqual(autostigmator_state, False)
+
+        ## Test if autostigmating gives repeatable results and check time it takes to auto stigmate.
+
+        # Create sets holding stigmator values to check if the outcome is consistent
+        stigmator_values_x = []  # List holding only the stigmator values in x direction
+        stigmator_values_y = []  # List holding only the stigmator values in y direction
+
+        # Run apply_autostigmator multiple times and afterwards check if the outcome is the same for each run
+        for i in range(0, 5):
+            autostigmator_return = self.scanner.applyAutoStigmator(detector)
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            autostigmator_state = self.microscope.is_autostigmating(detector2ChannelName[detector])
+            self.assertEqual(autostigmator_state, True)
+            self.assertIsInstance(autostigmator_return, ProgressiveFuture)
+
+            starting_time = time.time()
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            while self.microscope.is_autostigmating(detector2ChannelName[detector]):
+                time.sleep(0.2)  # Wait until the autofocus is finished
+                if time.time() - starting_time > 30:
+                    break
+
+            # Check if the time to perform the autofocus is not to long
+            self.assertLess(time.time() - starting_time, 30)
+            # Line to inspect the execution time to update the expected time
+            # print("Execution time was %s seconds " % (time.time() - starting_time))
+
+            stigmator_values_x.append(self.microscope.get_stigmator()[0])
+            stigmator_values_y.append(self.microscope.get_stigmator()[1])
+
+        # Check if all the stigmator values are within the required range each run
+        stigmator_range = self.microscope.stigmator_info()['range']
+        min_x_stig_values = stigmator_range['x'][0]
+        max_x_stig_values = stigmator_range['x'][1]
+        min_y_stig_values = stigmator_range['y'][0]
+        max_y_stig_values = stigmator_range['y'][1]
+        self.assertGreaterEqual(min(stigmator_values_x), min_x_stig_values)
+        self.assertLessEqual(max(stigmator_values_x), max_x_stig_values)
+        self.assertGreaterEqual(min(stigmator_values_y), min_y_stig_values)
+        self.assertLessEqual(max(stigmator_values_y), max_y_stig_values)
+
+        # TODO K.K. remove debug values after testing
+        print("X list is")
+        print(stigmator_values_x)
+        print("Y list is")
+        print(stigmator_values_y)
+        print("With a range of:")
+        print(self.microscope.stigmator_info()['range'])
+
+        # Test if an error is raised if an invalid detector is provided
+        with self.assertRaises(ValueError):
+            self.scanner.applyAutoStigmator("error_expected")
+        time.sleep(1.0)  # Give microscope/simulator the time to update the state
+        autostigmator_state = self.microscope.is_autostigmating(detector2ChannelName[detector])
+        self.assertEqual(autostigmator_state, False)  # Check if state remained unchanged
+
+    def test_apply_auto_contrast_brightness(self):
+        """
+        Test for the auto functionality of the apply_auto_contrast_brightness.
+        Only checks the returned state, the return object and if an error is raised for an incorrect input state.
+        """
+        for detector in detector2ChannelName:
+            # TODO K.K. remove line to test for multiple detectors if it works for channeld electron1
+            detector = 'se-detector'
+            auto_contrast_brightness_return = self.scanner.applyAutoContrastBrightness(detector)
+            time.sleep(1.5)  # Give microscope/simulator the time to update the state
+            auto_contrast_brightness_state = self.microscope.is_running_auto_contrast_brightness(detector2ChannelName[detector])
+            self.assertEqual(auto_contrast_brightness_state, True)
+            self.assertIsInstance(auto_contrast_brightness_return, ProgressiveFuture)
+
+            auto_contrast_brightness_return.cancel()
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            auto_contrast_brightness_state = self.microscope.is_running_auto_contrast_brightness(detector2ChannelName[detector])
+            self.assertEqual(auto_contrast_brightness_state, False)
+            self.assertIsInstance(auto_contrast_brightness_return, ProgressiveFuture)
+
+            self.scanner.applyAutoContrastBrightness(detector)
+            starting_time = time.time()
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            while self.microscope.is_running_auto_contrast_brightness(detector2ChannelName[detector]):
+                time.sleep(0.2)  # Wait until the autofocus is finished
+                if time.time() - starting_time > 30:
+                    break
+            # Check if the time to perform the autofocus is not to long
+            self.assertLess(time.time() - starting_time, 30)
+            # Line to inspect the execution time to update the expected time
+            # print("Execution time was %s seconds " % (time.time() - starting_time))
+            auto_contrast_brightness_state = self.microscope.is_running_auto_contrast_brightness(detector2ChannelName[detector])
+            self.assertEqual(auto_contrast_brightness_state, False)
+
+        # Test if an error is raised if an invalid detector is provided
+        with self.assertRaises(ValueError):
+            self.scanner.applyAutoContrastBrightness("error_expected")
+        time.sleep(1.0)  # Give microscope/simulator the time to update the state
+        autofocus_state = self.microscope.is_autofocusing(detector2ChannelName[detector])
+        self.assertEqual(autofocus_state, False)
+
+    def test_apply_autofocus(self):
+        """
+        Test for the auto functionality of the autofocus.
+        Only checks the returned state, the return object and if an error is raised for an incorrect input state.
+        """
+        # Check all the different detector types by looping over them
+        for detector in detector2ChannelName:
+            # TODO K.K. remove line to test for multiple detectors if it works for channeld electron1
+            detector = 'se-detector'
+            autofocus_return = self.efocus.applyAutofocus(detector)
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            autofocus_state = self.microscope.is_autofocusing(detector2ChannelName[detector])
+            self.assertEqual(autofocus_state, True)
+            self.assertIsInstance(autofocus_return, ProgressiveFuture)
+
+            autofocus_return.cancel()
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            autofocus_state = self.microscope.is_autofocusing(detector2ChannelName[detector])
+            self.assertEqual(autofocus_state, False)
+            self.assertIsInstance(autofocus_return, ProgressiveFuture)
+
+            autofocus_return = self.efocus.applyAutofocus(detector)
+            starting_time = time.time()
+            time.sleep(0.5)  # Give microscope/simulator the time to update the state
+            while self.microscope.is_autofocusing(detector2ChannelName[detector]):
+                time.sleep(0.2)  # Wait until the autofocus is finished
+                if time.time() - starting_time > 30:
+                    break
+            # Check if the time to perform the autofocus is not to long
+            self.assertLess(time.time() - starting_time, 30)
+            # Line to inspect the execution time to update the expected time
+            print("Execution tim-e was %s seconds " % (time.time() - starting_time))
+            autofocus_state = self.microscope.is_autofocusing(detector2ChannelName[detector])
+            self.assertEqual(autofocus_state, False)
+
+        # Test if an error is raised if an invalid detector is provided
+        with self.assertRaises(KeyError):
+            self.efocus.applyAutofocus("error_expected")
+        time.sleep(1.0)  # Give microscope/simulator the time to update the state
+        autofocus_state = self.microscope.is_autofocusing(detector2ChannelName[detector])
+        self.assertEqual(autofocus_state, False)
 
 if __name__ == '__main__':
     unittest.main()

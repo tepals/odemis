@@ -21,28 +21,35 @@ http://www.gnu.org/licenses/.
 """
 from __future__ import division, print_function
 
-import base64
 import logging
 import threading
 import time
 from concurrent.futures import CancelledError
 
-import msgpack
-import msgpack_numpy as m
-from Pyro5.api import Proxy
+import Pyro5.api
+import msgpack_numpy
 
 from odemis import model
 from odemis import util
-from odemis.model import CancellableThreadPoolExecutor, HwError, isasync, CancellableFuture
+from odemis.model import CancellableThreadPoolExecutor, HwError, isasync, CancellableFuture, ProgressiveFuture
+
+Pyro5.api.config.SERIALIZER = 'msgpack'
+msgpack_numpy.patch()
 
 XT_RUN = "run"
 XT_STOP = "stop"
-XT_CANCEL = "cancel"
 
+detector2ChannelName = {
+    "se-detector": "electron1",
+    "TODO-Thera"  : "ion2",
+    "chamber-ccd"  : "optical4"
+}
 
 class SEM(model.HwComponent):
     """
-    Class to communicate with a Microscope server via the ZeroRPC protocol.
+    Driver to communicate with XT software on TFS microscopes. XT is the software TFS uses to control their microscopes.
+    To use this driver the XT adapter developed by Delmic should be running on the TFS PC. Communication to the
+    Microscope server is done via Pyro5.
     """
 
     def __init__(self, name, role, children, address, daemon=None,
@@ -59,7 +66,7 @@ class SEM(model.HwComponent):
         model.HwComponent.__init__(self, name, role, daemon=daemon, **kwargs)
         self._proxy_access = threading.Lock()
         try:
-            self.server = Proxy(address)
+            self.server = Pyro5.api.Proxy(address)
             self.server._pyroTimeout = 30  # seconds
             self._swVersion = self.server.get_software_version()
             self._hwVersion = self.server.get_hardware_version()
@@ -144,7 +151,7 @@ class SEM(model.HwComponent):
             self.server._pyroClaimOwnership()
             return self.server.stage_info()
 
-    def acquire_image(self, channel_name):
+    def get_latest_image(self, channel_name):
         """
         Acquire an image observed via the currently set channel. Note: the channel needs to be stopped before an image
         can be acquired. To acquire multiple consecutive images the channel needs to be started and stopped. This
@@ -157,10 +164,8 @@ class SEM(model.HwComponent):
         """
         with self._proxy_access:
             self.server._pyroClaimOwnership()
-            x_enc = self.server.acquire_image(channel_name)
-            x_dec = base64.b64decode(x_enc['data'])
-            x_rec = msgpack.unpackb(x_dec, object_hook=m.decode)
-            return x_rec
+            image = self.server.get_latest_image(channel_name)
+            return image
 
     def set_scan_mode(self, mode):
         """
@@ -377,8 +382,8 @@ class SEM(model.HwComponent):
         ----------
         name: str
             name of channel.
-        state: "run" or "stop"
-            desired state of the channel.
+        state: bool
+            Desired state of the channel, if True set state to run, if False set state to stop.
         """
         with self._proxy_access:
             self.server._pyroClaimOwnership()
@@ -391,7 +396,7 @@ class SEM(model.HwComponent):
 
         Parameters
         ----------
-        desired_state: "run", "stop" or "cancel"
+        desired_state: XT_RUN or XT_STOP
             The state the channel should change into.
         name: str
             name of channel.
@@ -403,7 +408,7 @@ class SEM(model.HwComponent):
             self.server.wait_for_state_changed(desired_state, name, timeout)
 
     def get_channel_state(self, name):
-        """Returns: (str) the state of the channel: "run", "stop" or "cancel"."""
+        """Returns: (str) the state of the channel: XT_RUN or XT_STOP."""
         with self._proxy_access:
             self.server._pyroClaimOwnership()
             return self.server.get_channel_state(name)
@@ -462,7 +467,7 @@ class SEM(model.HwComponent):
         ----------
         name: str
             Name of one of the electron channels, the channel must be running.
-        state: "start", "cancel" or "stop"
+        state: XT_RUN or XT_STOP
             If state is start, autofocus starts. States cancel and stop both stop the autofocusing. Some microscopes
             might need stop, while others need cancel. The Apreo system requires stop.
         """
@@ -470,11 +475,15 @@ class SEM(model.HwComponent):
             self.server._pyroClaimOwnership()
             self.server.set_autofocusing(name, state)
 
-    def is_autofocusing(self):
-        """Returns: (bool) True if autofocus is running and False if autofocus is not running."""
+    def is_autofocusing(self, channel_name):
+        """
+        Args:
+            channel_name (str): holds the channels name on which the state is checked.
+
+        Returns: (bool) True if autofocus is running and False if autofocus is not running."""
         with self._proxy_access:
             self.server._pyroClaimOwnership()
-            return self.server.is_autofocusing()
+            return self.server.is_autofocusing(channel_name)
 
     def set_auto_contrast_brightness(self, name, state):
         """
@@ -484,28 +493,31 @@ class SEM(model.HwComponent):
         ----------
         name: str
             Name of one of the electron channels.
-        state: "start", "cancel" or "stop"
+        state: XT_RUN or XT_STOP
             If state is start, auto contrast brightness starts. States cancel and stop both stop the auto contrast
-            brightness. Some microscopes might need stop, while others need cancel. The Apreo system requires stop.
+            brightness.
         """
         with self._proxy_access:
             self.server._pyroClaimOwnership()
             self.server.set_auto_contrast_brightness(name, state)
 
-    def is_running_auto_contrast_brightness(self):
+    def is_running_auto_contrast_brightness(self, channel_name):
         """
+        Args:
+            channel_name (str): holds the channels name on which the state is checked.
+
         Returns: (bool) True if auto contrast brightness is running and False if auto contrast brightness is not
         running.
         """
         with self._proxy_access:
             self.server._pyroClaimOwnership()
-            return self.server.is_running_auto_contrast_brightness()
+            return self.server.is_running_auto_contrast_brightness(channel_name)
 
     def get_beam_shift(self):
         """Returns: (float) the current beam shift x and y values in meters."""
         with self._proxy_access:
             self.server._pyroClaimOwnership()
-            return self.server.get_beam_shift()
+            return tuple(self.server.get_beam_shift())
 
     def set_beam_shift(self, x_shift, y_shift):
         """Set the current beam shift values in meters."""
@@ -555,6 +567,160 @@ class SEM(model.HwComponent):
             self.server._pyroClaimOwnership()
             return self.server.rotation_info()
 
+    def set_beam_power(self, state):
+        """
+        Turn on or off the beam power.
+
+        Parameters
+        ----------
+        state: bool
+            True to turn on the beam and False to turn off the beam.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            self.server.set_beam_power(state)
+
+    def get_beam_is_on(self):
+        """Returns True if the beam is on and False if the beam is off."""
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.get_beam_is_on()
+
+    def is_autostigmating(self, channel_name):
+        """
+        Args:
+            channel_name (str): holds the channels name on which the state is checked.
+
+        Returns True if autostigmator is running and False if autostigmator is not running."""
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.is_autostigmating(channel_name)
+
+    def set_autostigmator(self, channel_name, state):
+        """
+        Set the state of autostigmator, beam must be turned on. This is non-blocking.
+
+        Parameters
+        ----------
+        channel_name: str
+            Name of one of the electron channels, the channel must be running.
+        state: XT_RUN or XT_STOP
+            State is start, starts the autostigmator. States cancel and stop both stop the autostigmator, some
+            microscopes might need stop, while others need cancel.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.set_autostigmator(channel_name, state)
+
+    def get_pitch(self):
+        """
+        Get the pitch between two beams within the multiprobe pattern.
+        Returns
+        -------
+        pitch: float, [um]
+            The distance between two beams of the multiprobe pattern.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.get_pitch()
+
+    def set_pitch(self, pitch):
+        """
+        Set the pitch between two beams within the multiprobe pattern.
+        Returns
+        -------
+        pitch: float, [um]
+            The distance between two beams of the multiprobe pattern.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.set_pitch(pitch)
+
+    def get_primary_stigmator(self):
+        """
+        Get the control values of the primary stigmator. Within the MBSEM system
+        there are two stigmators to correct for both beamlet astigmatism as well
+        as multi-probe shape. Each stigmator has two control values; x and y.
+        Returns
+        -------
+        tuple, (x, y) control values of primary stigmator, unitless.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.get_primary_stigmator()
+
+    def set_primary_stigmator(self, x, y):
+        """
+        Set the control values of the primary stigmator. Within the MBSEM system
+        there are two stigmators to correct for both beamlet astigmatism as well
+        as multi-probe shape. Each stigmator has two control values; x and y.
+        Parameters
+        -------
+        (x, y) control values of primary stigmator, unitless.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.set_primary_stigmator(x, y)
+
+    def get_secondary_stigmator(self):
+        """
+        Get the control values of the secondary stigmator. Within the MBSEM system
+        there are two stigmators to correct for both beamlet astigmatism as well
+        as multi-probe shape. Each stigmator has two control values; x and y.
+        Returns
+        -------
+        tuple, (x, y) control values of primary stigmator, unitless.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.get_secondary_stigmator()
+
+    def set_secondary_stigmator(self, x, y):
+        """
+        Get the control values of the secondary stigmator. Within the MBSEM system
+        there are two stigmators to correct for both beamlet astigmatism as well
+        as multi-probe shape. Each stigmator has two control values; x and y.
+        Parameters
+        -------
+        (x, y) control values of primary stigmator, unitless.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.set_secondary_stigmator(x, y)
+
+    def get_dc_coils(self):
+        """
+        Get the four values of the dc coils.
+        Returns
+        -------
+        list, len 4
+            These 4 items describe 4x2 transformation matrix for 1 um beam shift using DC coils.
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.get_dc_coils()
+
+    def get_use_case(self):
+        """
+        Get the current state of the use case.
+        Returns
+        -------
+        state: 'MultiBeamTile' or 'SinglBeamlet'
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.get_use_case()
+
+    def set_use_case(self, state):
+        """
+        Parameters
+        ----------
+        state: 'MultiBeamTile' or 'SinglBeamlet'
+        """
+        with self._proxy_access:
+            self.server._pyroClaimOwnership()
+            return self.server.set_use_case(state)
+
 
 class Scanner(model.Emitter):
     """
@@ -566,6 +732,10 @@ class Scanner(model.Emitter):
 
     def __init__(self, name, role, parent, hfw_nomag, **kwargs):
         model.Emitter.__init__(self, name, role, parent=parent, **kwargs)
+
+        # will take care of executing autocontrast and autostigmator asynchronously
+        self._executor = CancellableThreadPoolExecutor(max_workers=1)  # one task at a time
+
         self._hfw_nomag = hfw_nomag
 
         dwell_time_info = self.parent.dwell_time_info()
@@ -635,6 +805,110 @@ class Scanner(model.Emitter):
         self._updateSettings()
         self._va_poll = util.RepeatingTimer(5, self._updateSettings, "Settings polling")
         self._va_poll.start()
+
+    @isasync
+    def applyAutoStigmator(self, detector):
+        """
+        Wrapper for running the auto stigmator functionality asynchronously. It sets the state of autostigmator,
+        the beam must be turned on unblanked. This call is non-blocking.
+
+        :param channel_name (str): Name of one of the electron channels, the channel must be running.
+        :return: Future object
+        """
+        # TODO Mapping form microscope object.raw or something to channel name electron_1 etc.
+        # Create ProgressiveFuture and update its state
+        est_start = time.time() + 0.1
+        f = ProgressiveFuture(start=est_start,
+                              end=est_start + 8)  # rough time estimation
+        f._auto_stigmator_lock = threading.Lock()
+        f._must_stop = threading.Event()  # cancel of the current future requested
+        f.task_canceller = self._cancelAutoStigmator
+        f.channel_name = detector2ChannelName[detector]
+        return self._executor.submitf(f, self._applyAutoStigmator, f)
+
+    def _applyAutoStigmator(self, future):
+        """
+        Starts applying auto stigmator and checks if the process is finished for the ProgressiveFuture object.
+        :param future (Future): the future to stop. Unused, only one future must be running at a time.
+        """
+        channel_name = future.channel_name
+        with future._auto_stigmator_lock:
+            if future._must_stop.is_set():
+                raise CancelledError()
+            self.parent.set_autostigmator(channel_name, XT_RUN)
+            time.sleep(0.5)  # Wait for the auto stigmator to start
+        # Wait until the microscope is no longer applying auto stigmator
+
+        while self.parent.is_autostigmating(channel_name):
+            future._must_stop.wait(0.1)
+            if future._must_stop.is_set():
+                raise CancelledError()
+
+    def _cancelAutoStigmator(self, future):
+        """
+        Cancels the auto stigmator. Non-blocking.
+        :param future (Future): the future to stop. Unused, only one future must be running at a time.
+        :return (bool): True if it successfully cancelled (stopped) the move.
+        """
+        logging.debug("Cancelling current move")
+        future._must_stop.set()  # tell the thread taking care of auto stigmator it's over
+
+        with future._auto_stigmator_lock:
+            self.parent.set_autostigmator(future.channel_name, XT_STOP)
+            return True
+
+    @isasync
+    def applyAutoContrastBrightness(self, detector):
+        """
+        Wrapper for running the automatic setting of the contrast brightness functionality asynchronously. It sets
+        the state of auto_contrast_brightness, the beam must be turned on unblanked. Auto contrast brightness works
+        best if there is a feature visible in the image. This call is non-blocking.
+
+        :param channel_name (str): Name of one of the electron channels, the channel must be running.
+        :return: Future object
+
+        """
+        # TODO Mapping form microscope object.raw or something to channel name electron_1 etc.
+        # Create ProgressiveFuture and update its state
+        est_start = time.time() + 0.1
+        f = ProgressiveFuture(start=est_start,
+                              end=est_start + 20)  # rough time estimation
+        f._auto_contrast_brighness_lock_lock = threading.Lock()
+        f._must_stop = threading.Event()  # cancel of the current future requested
+        f.task_canceller = self._cancelAutoContrastBrightness
+        f.channel_name = detector2ChannelName[detector]
+        return self._executor.submitf(f, self._applyAutoContrastBrightness, f)
+
+    def _applyAutoContrastBrightness(self, future):
+        """
+        Starts applying auto contrast brightness and checks if the process is finished for the ProgressiveFuture object.
+        :param future (Future): the future to stop. Unused, only one future must be running at a time.
+        """
+        channel_name = future.channel_name
+        with future._auto_contrast_brighness_lock_lock:
+            if future._must_stop.is_set():
+                raise CancelledError()
+            self.parent.set_auto_contrast_brightness(channel_name, XT_RUN)
+            time.sleep(0.5)  # Wait for the autofocussing to start
+        # Wait until the microscope is no longer autofocussing
+
+        while self.parent.is_running_auto_contrast_brightness(channel_name):
+            future._must_stop.wait(0.1)
+            if future._must_stop.is_set():
+                raise CancelledError()
+
+    def _cancelAutoContrastBrightness(self, future):
+        """
+        Cancels the autofocussing. Non-blocking.
+        :param future (Future): the future to stop. Unused, only one future must be running at a time.
+        :return (bool): True if it successfully cancelled (stopped) the move.
+        """
+        logging.debug("Cancelling current move")
+        future._must_stop.set()  # tell the thread taking care of autofocussing it's over
+
+        with future._auto_contrast_brighness_lock_lock:
+            self.parent.set_auto_contrast_brightness(future.channel_name, XT_STOP)
+            return True
 
     def _updateSettings(self):
         """
@@ -956,6 +1230,59 @@ class Focus(model.Actuator):
         # Refresh regularly the position
         self._pos_poll = util.RepeatingTimer(5, self._refreshPosition, "Position polling")
         self._pos_poll.start()
+
+    @isasync
+    def applyAutofocus(self, detector):
+        """
+        Wrapper for running the autofocus functionality asynchronously. It sets the state of autofocus,
+        the beam must be turned on unblanked. Also a a reasonable manual focus is needed. When the image is to far
+        out of focus, an incorrect focus can be found using the autofocus functionality.
+        This call is non-blocking.
+
+        :param channel_name (str): Name of one of the electron channels, the channel must be running.
+        :param state (str):  "run", or "stop"
+        :return: Future object
+        """
+        # TODO Mapping form microscope object.raw or something to channel name electron_1 etc.
+        # Create ProgressiveFuture and update its state
+        est_start = time.time() + 0.1
+        f = ProgressiveFuture(start=est_start,
+                              end=est_start + 11)  # rough time estimation
+        f._autofocus_lock = threading.Lock()
+        f._must_stop = threading.Event()  # cancel of the current future requested
+        f.task_canceller = self._cancelAutoFocus
+        f.channel_name = detector2ChannelName[detector]
+        return self._executor.submitf(f, self._applyAutofocus, f)
+
+    def _applyAutofocus(self, future):
+        """
+        Starts autofocussing and checks if the autofocussing process is finished for ProgressiveFuture.
+        """
+        channel_name = future.channel_name
+        with future._autofocus_lock:
+            if future._must_stop.is_set():
+                raise CancelledError()
+            self.parent.set_autofocusing(channel_name, XT_RUN)
+            time.sleep(0.5)  # Wait for the autofocussing to start
+        # Wait until the microscope is no longer autofocussing
+
+        while self.parent.is_autofocusing(channel_name):
+            future._must_stop.wait(0.1)
+            if future._must_stop.is_set():
+                raise CancelledError()
+
+    def _cancelAutoFocus(self, future):
+        """
+        Cancels the autofocussing. Non-blocking.
+        :param future (Future): the future to stop. Unused, only one future must be running at a time.
+        :return (bool): True if it successfully cancelled (stopped) the move.
+        """
+        logging.debug("Cancelling current move")
+        future._must_stop.set()  # tell the thread taking care of autofocussing it's over
+
+        with future._autofocus_lock:
+            self.parent.set_autofocusing(future.channel_name, XT_STOP)
+            return True
 
     def _updatePosition(self):
         """

@@ -12,6 +12,7 @@ MultiBeamSEM: {
     role: diagnostic-ccd,
     init: {
         device: null,
+        transp: [-1, -2],
     },
     children: {focus: "DiagnosticCam Focus"}
 }
@@ -34,6 +35,7 @@ MultiBeamSEM: {
     init: {
         port: "/dev/ttyUSB0",
         # axis -> controller, channel, closed-loop?
+        master: 1,
         axes: {
             "z": [null, "Z", True]
         },

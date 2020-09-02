@@ -1,0 +1,297 @@
+# -*- coding: utf-8 -*-
+"""
+Created on 11 May 2020
+
+@author: Philip Winkler
+
+Copyright © 2020 Philip Winkler, Delmic
+
+This file is part of Odemis.
+
+Odemis is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License version 2 as published by the Free Software
+Foundation.
+
+Odemis is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+Odemis. If not, see http://www.gnu.org/licenses/.
+"""
+from __future__ import division
+
+import logging
+import math
+
+import numpy
+import serial
+import serial.tools.list_ports
+from pymodbus.client.sync import ModbusSerialClient
+
+from odemis import model
+from odemis.model import HwError
+
+# Parameters for connection
+BAUDRATE = 230400
+TIMEOUT = 1
+BYTESIZE = 8
+PARITY = serial.PARITY_NONE
+STOPBITS = 1
+
+# Modbus level addresses
+SLAVE_UNIT = 2
+
+# Modbus registers
+BEAMDEFL_LX = 0  # lower x beam deflection element control
+BEAMDEFL_LY = 1  # lower y beam deflection element control
+BEAMDEFL_UX = 2  # upper x beam deflection element control
+BEAMDEFL_UY = 3  # upper y beam deflection element control
+
+RANGE_AMPS = [-42.2e-3, 42.2e-3]  # range of currents accepted by device, correspond to deflection of beam
+DEFAULT_GAIN = [3e6, 3e6]  # 3e6 amp/m = 3 mamp / nm
+
+
+class BeamShiftController(model.HwComponent):
+    """
+    Driver for the Thermofischer beam deflection controller.
+    This class provides the .shift VA containing a tuple of two floats which describe
+    the x and y beam offset in m in the stage coordinate system.
+
+    The device accepts ampere values. The conversion from meter to amperes depends on
+    three metadata:
+        * MD_CALIB_SCALE (float, float): conversion factor ampere/meter (gain)
+        * MD_CALIB_TRANSLATION (float, float): offset in amps (already in the beam coordinate system, will not be transformed)
+        * MD_CALIB_ROTATION (float): angle in radians
+    """
+
+    def __init__(self, name, role, port=None, serialnum=None, **kwargs):
+        """
+        :param port (str): port (e.g. /dev/ttyUSB0)
+        :param serialnum (str): serial number of RS485 adapter
+        """
+        # .hwVersion, .swVersion not available
+        model.HwComponent.__init__(self, name, role, **kwargs)
+
+        # Find port by RS485 adapter serial number
+        self._port = self._findDevice(port, serialnum)
+        self._serial = self._openSerialPort(self._port)
+
+        # Shift VA
+        # Range depends on metadata and will be checked in ._write_registers
+        self.shift = model.TupleContinuous((0, 0), range=((-1, -1), (1, 1)),
+                                           cls=(int, float), unit="m",
+                                           setter=self._setShift)
+
+    def _findDevice(self, ports=None, serialnum=None):
+        """
+        Look for a compatible device. Requires at least one of the arguments ports and serialnum.
+        ports (str): port (e.g. "/dev/ttyUSB0") or pattern for port ("/dev/ttyUSB*"), "/dev/fake" will start the simulator
+        serialnum (str): serial number
+        return (str): the name of the port used
+        raises:
+            ValueError: if no device on the ports with the given serial number is found
+        """
+        # At least one of the arguments ports and serialnum must be specified
+        if not ports and not serialnum:
+            raise ValueError("At least one of the arguments 'ports' and 'serialnum' must be specified.")
+
+        # For debugging purpose
+        if ports == "/dev/fake":
+            return ports
+
+        # If no ports specified, check all available ports
+        if ports:
+            names = list(serial.tools.list_ports.grep(ports))
+        else:
+            names = serial.tools.list_ports.comports()  # search all serial ports
+
+        # Look for serial number if available, otherwise make sure only one port matches the port pattern.
+        if serialnum:
+            for port in names:
+                if serialnum in port.description or serialnum in port.hwid:
+                    # "RS485" is in port.description, .hwid presumably contains serial number, TODO: check this!
+                    return port.device  # Found it!
+            else:
+                raise HwError("Beam controller device with serial number %s not found for port %s. " % (serialnum, names) +
+                              "Check the connection.")
+        else:
+            if len(names) == 1:
+                port = names[0]
+                return port.device
+            elif len(names) > 1:
+                raise HwError("Multiple ports detected for beam controller. Please specify a serial number.")
+            else:
+                raise HwError("Beam controller device not found for port %s. Check the connection." % ports)
+
+    def _openSerialPort(self, port):
+        if self._port == "/dev/fake":
+            return BeamShiftControllerSimulator()
+        else:
+            return ModbusSerialClient(method='rtu', port=port,
+                                      baudrate=BAUDRATE, timeout=TIMEOUT,
+                                      stopbits=STOPBITS, parity=PARITY,
+                                      bytesize=BYTESIZE)
+
+    def _setShift(self, value):
+        """
+        :param value (float, float): x, y shift from the center (in m)
+        """
+        # Note on duration: a write instruction takes about 14 ms, a read instruction about 20 ms
+        gain = self._metadata.get(model.MD_CALIB_SCALE)
+        if not gain:
+            gain = DEFAULT_GAIN
+            logging.error("No gain specified, assuming default of %s." % gain +
+                          "Calibration is required to set shift in a meaningful way.")
+
+        offset = self._metadata.get(model.MD_CALIB_TRANSLATION)
+        if not offset:
+            logging.warning("No deflection offset specified, assuming 0 amps.")
+            offset = (0, 0)
+
+        rotation = self._metadata.get(model.MD_CALIB_ROTATION)
+        if not offset:
+            logging.warning("No rotation specified, assuming 0 rad.")
+            rotation = 0
+        rot_matrix = numpy.array(((math.cos(rotation), -math.sin(rotation)),
+                                  (math.sin(rotation), math.cos(rotation))))
+
+        # Convert to numpy.array to simplify calculation
+        value = numpy.array(value, dtype=numpy.float64)
+        gain = numpy.array(gain, dtype=numpy.float64)  # amps / m
+        offset = numpy.array(offset, dtype=numpy.float64)  # amps
+        amp_range = numpy.array(RANGE_AMPS, dtype=numpy.float64)
+
+        # Convert to beam coordinates (rotation), then from meter to amperes (with gain) and add offset
+        value = value.dot(rot_matrix) * gain + offset
+        clipped = numpy.clip(value, amp_range[0], amp_range[1])
+
+        if any(clipped != value):
+            logging.warning("Shift %s out of range %s. " % (value, amp_range) +
+                            "Clipping to %s" % clipped)
+            value = clipped
+
+        # Convert to 16-bit integer
+        conversion_factor = 0xFFFF / (amp_range[1] - amp_range[0])
+        valuePos = (value - amp_range[0]) * conversion_factor
+        valueNeg = (-value - amp_range[0]) * conversion_factor
+        register_values = [round(valueNeg[0]), round(valueNeg[1]), round(valuePos[0]), round(valuePos[1])]
+
+        # Read previous value of registers for debugging purpose
+        ret = self._read_registers()
+        logging.debug("Register values before writing: %s." % ret)
+
+        logging.debug("Writing register values %s" % register_values)
+        self._write_registers([int(val) for val in register_values])  # round doesn't return int
+
+        # Don't read value back to save some time (reading operation takes ~20 ms, writing operation ~14 ms)
+        # Read back values to see if everything went fine
+        # ret = self._read_registers()
+        # if ret != register_values:
+        #     logging.error("Register values after writing %s != %s." % (ret, register_values))
+
+        # Convert rounded shift back to meter for return value
+        value = ((value - offset) / gain).dot(rot_matrix.transpose())
+        return value
+
+    def _write_registers(self, values):
+        """
+        Write to all four registers. Try to reconnect to device in case connection was lost.
+        :values (list of 4 ints): register values (-x, -y, x, y)
+        """
+        if len(values) != 4:
+            raise ValueError("write_registers received payload of invalid length %s != 4." % len(values))
+
+        # Check if values are in allowed range
+        if not all(0 <= val <= 0xFFFF for val in values):
+            raise ValueError("Register values %s not in range [0, 65535]." % values)
+
+        try:
+            # write all registers together (starting at lower x register (=0x01))
+            rq = self._serial.write_registers(BEAMDEFL_LX, values, unit=SLAVE_UNIT)
+            #if rq.function_code < 0x80:  # test that we are not an error
+            #    raise model.HwError(rq.function_code)
+        except IOError:
+            self._reconnect()
+            raise IOError("Failed to write registers of beam control firmware, "
+                          "restarted serial connection.")
+
+    def _read_registers(self):
+        """
+        Read all four registers. Try to reconnect to device in case connection was lost.
+        :return (list of 4 ints): register values (-x, -y, x, y)
+        """
+        try:
+            # write all registers together (starting at lower x register (=0x01))
+            rr = self._serial.read_holding_registers(BEAMDEFL_LX, 4, unit=SLAVE_UNIT)
+            return rr.registers
+        except IOError:
+            self._reconnect()
+            raise IOError("Failed to write registers of beam control firmware, "
+                          "restarted serial connection.")
+
+    def _reconnect(self):
+        """
+        Attempt to reconnect the camera. It will block until this happens.
+        On return, the hardware should be ready to use as before, excepted it
+        still needs the settings to be applied.
+        """
+        num_it = 5
+        self.state._set_value(model.HwError("Beam deflection controller disconnected"), force_write=True)
+        logging.warning("Failed to write registers, trying to reconnect...")
+        for i in range(num_it):
+            try:
+                self._serial.close()
+                self._serial.connect()
+                logging.info("Recovered device.")
+                break
+            except IOError:
+                continue
+        else:
+            raise IOError("Failed to reconnect to beam deflection controller.")
+        self.state._set_value(model.ST_RUNNING, force_write=True)
+
+    def updateMetadata(self, md):
+        prev_rotation = self._metadata.get(model.MD_CALIB_ROTATION)
+        # Update .shift if rotation is changed (but don't set value in hardware)
+        if model.MD_CALIB_ROTATION in md.keys():
+            rotation = md[model.MD_CALIB_ROTATION] - prev_rotation if prev_rotation else md[model.MD_CALIB_ROTATION]
+            rot_matrix = numpy.array(((math.cos(rotation), -math.sin(rotation)),
+                                      (math.sin(rotation), math.cos(rotation))))
+            # If rotated to the left, shift as seen from new coordinate system is rotated to the right,
+            # so multiplication from the right
+            shift = rot_matrix.dot(self.shift.value)
+            self.shift._value = shift
+            self.shift.notify(shift)
+        model.HwComponent.updateMetadata(self, md)
+
+
+class BeamShiftControllerSimulator(object):
+
+    def __init__(self):
+        self.r0 = 0
+        self.r1 = 0
+        self.r2 = 0
+        self.r3 = 0
+
+    def write_registers(self, start_register, values, unit=None):
+        """
+        Writes four values in the registers r0-r3.
+        """
+        self.r0 = values[0]
+        self.r1 = values[1]
+        self.r2 = values[2]
+        self.r3 = values[3]
+        return SimplifiedModbusObject([])
+
+    def read_holding_registers(self, start_register, num_registers, unit=None):
+        return SimplifiedModbusObject([self.r0, self.r1, self.r2, self.r3][:num_registers])
+
+
+class SimplifiedModbusObject(object):
+    """
+    Simulate a modbus object (has .registers and .function_code attributes).
+    """
+    def __init__(self, registers):
+        self.function_code = 0x80
+        self.registers = registers

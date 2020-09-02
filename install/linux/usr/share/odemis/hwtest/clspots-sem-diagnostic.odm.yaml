@@ -2,7 +2,9 @@ MultiBeamSEM: {
   class: Microscope,
   role: mbsem,
   children: ["SEM", "EBeam Focus", "EBeam Stage", "EBeam control",
-             "DiagnosticCam", "DiagnosticCam Focus", "Sample Stage", "Optical Focus"],
+             "DiagnosticCam",
+             "DiagnosticCam Focus", "Sample Stage", "Optical Focus"
+  ],
 }
 
 # Axes: X is horizontal on screen (going left->right), physical: far->close when looking at the door
@@ -59,7 +61,7 @@ MultiBeamSEM: {
   class: xt_client.SEM,
   role: sem,
   init: {
-    address: "PYRO:Microscope@localhost:4242",
+    address: "PYRO:Microscope@172.16.4.4:4242",
   },
   children: {
     scanner: "EBeam control",

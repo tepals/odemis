@@ -11,6 +11,7 @@ This script provides a command line interface for displaying a video with a spot
 from __future__ import division, print_function
 
 import argparse
+
 import cairo
 import logging
 import numpy
@@ -43,7 +44,7 @@ class VideoDisplayerGrid(VideoDisplayer):
         coming pictures
         """
         self.app = ImageWindowApp(title, size)
-        self.gridsize = (14, 14) if gridsize is None else gridsize
+        self.gridsize = (8, 8) if gridsize is None else gridsize
 
     def new_image(self, data):
         """
@@ -51,7 +52,12 @@ class VideoDisplayerGrid(VideoDisplayer):
         at ratio 1:1)
         data (numpy.ndarray): an 2D array containing the image (can be 3D if in RGB)
         """
-        self.app.spots, self.app.translation, self.app.scaling, self.app.rotation = FindGridSpots(data, self.gridsize)
+        self.app.spots, trans, scale, rot, shear = FindGridSpots(data, self.gridsize, return_shear=True)
+        self.app.translation = trans[0], data.shape[0] - trans[1]
+        self.app.scale = scale
+        self.app.rotation = -rot
+        self.app.shear = shear
+
         super(VideoDisplayerGrid, self).new_image(data)
 
     def waitQuit(self):
@@ -107,10 +113,11 @@ class ImageWindowApp(wx.App):
         text_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
         info = [
             "rotation: {:.1f} deg".format(numpy.rad2deg(self.rotation)),
-            "pitch-x: {:.2f} um".format(PIXEL_SIZE_UM * self.scaling[0]),
-            "pitch-y: {:.2f} um".format(PIXEL_SIZE_UM * self.scaling[1]),
+            "pitch-x: {:.2f} um".format(PIXEL_SIZE_UM * self.scale[0]),
+            "pitch-y: {:.2f} um".format(PIXEL_SIZE_UM * self.scale[1]),
             "translation-x: {:.1f} um".format(PIXEL_SIZE_UM * self.translation[0]),
             "translation-y: {:.1f} um".format(PIXEL_SIZE_UM * self.translation[1]),
+            "shear: {:.5f} ".format(self.shear),
         ]
         ctx2 = cairo.Context(text_surface)
         ctx2.set_source_rgb(1.00, 0.83, 0.00)
@@ -204,7 +211,7 @@ def main(args):
     parser.add_argument("--role", dest="role", metavar="<component>",
                         help="display and update an image on the screen")
     parser.add_argument("--gridsize", dest="gridsize", nargs=2, metavar="<gridsize>", type=int, default=None,
-                        help="size of the grid of spots in x y, default 14 14")
+                        help="size of the grid of spots in x y, default 8 8")
     parser.add_argument("--log-level", dest="loglev", metavar="<level>", type=int, choices=[0, 1, 2],
                         default=0, help="set verbosity level (0-2, default = 0)")
     options = parser.parse_args(args[1:])

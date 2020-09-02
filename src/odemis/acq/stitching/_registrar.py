@@ -206,8 +206,13 @@ class ShiftRegistrar(object):
         tile_positions = []
         dep_tile_positions = []
 
+        # TODO K.K. remove this or implement differently
+        self.listed_shifts = [] # Made for Wilco, currenlty a debug value
         for ti in self.acqOrder:
+            #TODO K.K. check if it right that for horizontal scanning switch ti to 1,0 error in acqOrder/registered
+            # positions + more
             shift = self.registered_positions[ti[0]][ti[1]]
+            self.listed_shifts.append(shift)
             tile_positions.append(((shift[0] + firstPosition[0]) * self.px_size[0],
                                    (firstPosition[1] - shift[1]) * self.px_size[1]))
 
@@ -330,7 +335,8 @@ class ShiftRegistrar(object):
         (l1, t1, r1, b1), (l2, t2, r2, b2) = self._estimateROI(shift)
         a = prev_tile[t1:b1, l1:r1]
         b = tile[t2:b2, l2:r2]
-        [x, y] = MeasureShift(b, a)
+        #TODO K.K. -1 is here to exclude black line
+        [x, y] = MeasureShift(b[:,:-1], a[:,:-1])
         return x, y
 
     def _register_horizontally(self, row, col, xdir):
@@ -500,8 +506,12 @@ class GlobalShiftRegistrar(object):
         dep_tile_positions = []
 
         registered_positions = self._assemble_mosaic()
+        self.registered_positions = registered_positions
+        # TODO K.K. remove this or implement differently
+        self.listed_shifts = [] # a value to get the overscan parameters
         for ti in self.acq_order:
             shift = registered_positions[ti[0]][ti[1]]
+            self.listed_shifts.append(shift)
             tile_positions.append(((shift[0] + firstPosition[0]) * px_size[0],
                                    (firstPosition[1] - shift[1]) * px_size[1]))
 
@@ -619,7 +629,8 @@ class GlobalShiftRegistrar(object):
         tile_roi = numpy.array(tile)[t2:b2, l2:r2]
 
         # Calculate the shift
-        shift = MeasureShift(tile_roi, prev_tile_roi)
+        #TODO K.K. remove -1 is her just to prevent black line struggles with cross correlation
+        shift = MeasureShift(tile_roi[:, :-1], prev_tile_roi[:, :-1])
         shift_total = numpy.subtract(exp_shift, shift)
 
         # Measure accuracy (ncc value)
@@ -746,4 +757,8 @@ class GlobalShiftRegistrar(object):
             if i not in positions:
                 positions[i] = [None, None]
 
-        return numpy.array(list(positions.values())).reshape([num_rows, num_cols, 2])
+        # Sort positions by key
+        positions = sorted(positions.items(), key=lambda x: x[0])
+        # Select values and convert to numpy.array
+        positions = numpy.array([p[1] for p in positions])
+        return positions.reshape([num_rows, num_cols, 2])

@@ -178,9 +178,6 @@ MD_TIME_RANGE_TO_DELAY = "Streak time range to trigger delay"  # (dict) mapping 
 # dict (int (resolution X) -> dict (float (dwell time) -> tuple of 4 floats (correction factors)))
 MD_SHIFT_LOOKUP = "Pixel shift compensation table"
 
-# The following metadata is used for the calibration of the tfsbc.BeamShiftController
-MD_CALIB_BEAMSHIFT = "Beamshift calibration"  # 4x2 tuple, 4x (float, float), xupper, xlower, yupper, ylower
-
 # The following metadata is used to store specific known positions for the
 # actuators.
 MD_FAV_POS_ACTIVE = "Favourite position active"  # dict of str -> float representing a good position for being "active" (eg, mirror engaged, lens in use)
@@ -198,6 +195,6 @@ MD_GAIN_P = "Proportional gain"  # float
 MD_GAIN_I = "Integral gain"  # float
 MD_GAIN_D = "Derivative gain"  # float
 
-# The following is a string containing a dict encoded in JSON, which represents all the known states
-# of all the hardware used during an acquisition.
-MD_EXTRA_SETTINGS = "Extra settings"
+MD_CALIB_SCALE = "scale"
+MD_CALIB_ROTATION = "rotation"
+MD_CALIB_TRANSLATION = "translation"
