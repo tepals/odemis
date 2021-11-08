@@ -90,12 +90,12 @@ def main(args):
         # Apply autofocus
         try:
             if spgr:
-                future_focus = align.AutoFocusSpectrometer(spgr, focuser, det)
+                future_focus = align.auto_focus_spectrometer(spgr, focuser, det)
                 foc = future_focus.result(1000)  # putting a timeout allows to get KeyboardInterrupts
                 logging.info("Focus levels after applying autofocus: %s",
                              "".join("\n\tgrating %d on %s @ %f m" % (g, d.name, f) for (g, d), f in foc.items()))
             else:
-                future_focus = align.AutoFocus(det, emt, focuser)
+                future_focus = align.auto_focus(det, emt, focuser)
                 foc_pos, fm_final = future_focus.result(1000)  # putting a timeout allows to get KeyboardInterrupts
                 logging.info("Focus level after applying autofocus: %f @ %f m", fm_final, foc_pos)
         except KeyboardInterrupt:

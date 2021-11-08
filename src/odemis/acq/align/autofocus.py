@@ -39,7 +39,6 @@ from scipy.signal import medfilt
 import threading
 import time
 
-
 MTD_BINARY = 0
 MTD_EXHAUSTIVE = 1
 
@@ -47,9 +46,9 @@ MAX_STEPS_NUMBER = 100  # Max steps to perform autofocus
 MAX_BS_NUMBER = 1  # Maximum number of applying binary search with a smaller max_step
 
 
-def _convertRBGToGrayscale(image):
+def _convert_rgb_to_grayscale(image):
     """
-    Quick and dirty convertion of RGB data to grayscale
+    Quick and dirty conversion of RGB data to grayscale
     image (numpy array of shape YX3)
     return (numpy array of shape YX)
     """
@@ -62,7 +61,7 @@ def _convertRBGToGrayscale(image):
     return gray
 
 
-def AssessFocus(levels, min_ratio=15):
+def assess_focus(levels, min_ratio=15):
     """
     Given a list of focus levels, it decides if there is any significant value
     or it only contains noise.
@@ -86,7 +85,7 @@ def AssessFocus(levels, min_ratio=15):
     return False
 
 
-def MeasureSEMFocus(image):
+def measure_sem_focus(image):
     """
     Given an image, focus measure is calculated using the standard deviation of
     the raw data.
@@ -96,12 +95,12 @@ def MeasureSEMFocus(image):
     # Handle RGB image
     if len(image.shape) == 3:
         # TODO find faster/better solution
-        image = _convertRBGToGrayscale(image)
+        image = _convert_rgb_to_grayscale(image)
 
     return ndimage.standard_deviation(image)
 
 
-def MeasureOpticalFocus(image):
+def measure_optical_focus(image):
     """
     Given an image, focus measure is calculated using the variance of Laplacian
     of the raw data.
@@ -111,22 +110,24 @@ def MeasureOpticalFocus(image):
     # Handle RGB image
     if len(image.shape) == 3:
         # TODO find faster/better solution
-        image = _convertRBGToGrayscale(image)
+        image = _convert_rgb_to_grayscale(image)
 
     return cv2.Laplacian(image, cv2.CV_64F).var()
 
 
-def Measure1d(image):
+def measure_1d(image):
     """
     Given an image of a 1 line ccd, measure the focus based on the inverse of the width of a gaussian fit of the data.
     It is assumed that the signal is in focus when the width of the signal is smallest and therefore sigma is smallest.
     image (model.DataArray): 1D image from 1 line ccd.
     returns (float): The focus level of the image, based on the inverse of the width of a gaussian fitted on the image.
     """
+
     # Use the gauss function to fit a gaussian to the 1 line image.
     def gauss(x, amplitude, pos, width, base):
         y = amplitude * numpy.exp(-(x - pos) ** 2 / (2 * width ** 2)) + base
         return y
+
     # squeeze to make sure the image array is 1d.
     signal = numpy.squeeze(image)
     # Apply a median filter with a kernel of 5, to handle noise with up to 2 neighbouring pixels with a very high value,
@@ -152,7 +153,7 @@ def Measure1d(image):
     return 1 / abs(popt[2])
 
 
-def MeasureSpotsFocus(image):
+def measure_spots_focus(image):
     """
     Focus measurement metric based on Tenengrad variance:
         Pech, J.; Cristobal, G.; Chamorro, J. & Fernandez, J. Diatom autofocusing in brightfield microscopy: a
@@ -169,7 +170,7 @@ def MeasureSpotsFocus(image):
     return sobel_image.var()
 
 
-def getNextImage(det, timeout=None):
+def get_next_image(det, timeout=None):
     """
     Acquire one image from the given detector
     det (model.Detector): detector from which to acquire an image
@@ -197,7 +198,7 @@ def getNextImage(det, timeout=None):
     return data_shared[0]
 
 
-def AcquireNoBackground(det, dfbkg=None, timeout=None):
+def acquire_no_background(det, dfbkg=None, timeout=None):
     """
     Performs optical acquisition with background subtraction if possible.
     Particularly used in order to eliminate the e-beam source background in the
@@ -214,18 +215,18 @@ def AcquireNoBackground(det, dfbkg=None, timeout=None):
     """
     if dfbkg is not None:
         # acquire background
-        bg_image = getNextImage(det, timeout)
+        bg_image = get_next_image(det, timeout)
 
         # acquire with signal
         dfbkg.subscribe(_discard_data)
         try:
-            data = getNextImage(det, timeout)
+            data = get_next_image(det, timeout)
         finally:
             dfbkg.unsubscribe(_discard_data)
 
         return Subtract(data, bg_image)
     else:
-        return getNextImage(det, timeout)
+        return get_next_image(det, timeout)
 
 
 def _discard_data(df, data):
@@ -235,7 +236,7 @@ def _discard_data(df, data):
     pass
 
 
-def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
+def _do_binary_focus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
     """
     Iteratively acquires an optical image, measures its focus level and adjusts
     the optical focus with respect to the focus level.
@@ -277,7 +278,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
 
     try:
         # Big timeout, most important being that it's shorter than eternity
-        timeout = 3 + 2 * estimateAcquisitionTime(detector, emt)
+        timeout = 3 + 2 * estimate_acquisition_time(detector, emt)
 
         # use the .depthOfField on detector or emitter as maximum stepsize
         avail_depths = (detector, emt)
@@ -326,28 +327,28 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
         if len(detector.shape) > 1:
             if detector.role == 'diagnostic-ccd':
                 logging.debug("Using Spot method to estimate focus")
-                Measure = MeasureSpotsFocus
+                Measure = measure_spots_focus
             elif detector.resolution.value[1] == 1:
                 logging.debug("Using 1d method to estimate focus")
-                Measure = Measure1d
+                Measure = measure_1d
             else:
                 logging.debug("Using Optical method to estimate focus")
-                Measure = MeasureOpticalFocus
+                Measure = measure_optical_focus
         else:
             logging.debug("Using SEM method to estimate focus")
-            Measure = MeasureSEMFocus
+            Measure = measure_sem_focus
 
         step_factor = 2 ** 7
         if good_focus is not None:
             current_pos = focus.position.value['z']
-            image = AcquireNoBackground(detector, dfbkg, timeout)
+            image = acquire_no_background(detector, dfbkg, timeout)
             fm_current = Measure(image)
             logging.debug("Focus level at %f is %f", current_pos, fm_current)
             focus_levels[current_pos] = fm_current
 
             focus.moveAbsSync({"z": good_focus})
             good_focus = focus.position.value["z"]
-            image = AcquireNoBackground(detector, dfbkg, timeout)
+            image = acquire_no_background(detector, dfbkg, timeout)
             fm_good = Measure(image)
             logging.debug("Focus level at %f is %f", good_focus, fm_good)
             focus_levels[good_focus] = fm_good
@@ -384,7 +385,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             if (rough_search or last_pos == center) and center in focus_levels:
                 fm_center = focus_levels[center]
             else:
-                image = AcquireNoBackground(detector, dfbkg, timeout)
+                image = acquire_no_background(detector, dfbkg, timeout)
                 fm_center = Measure(image)
                 logging.debug("Focus level (center) at %f is %f", center, fm_center)
                 focus_levels[center] = fm_center
@@ -400,7 +401,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
                 focus.moveAbsSync({"z": right})
                 right = focus.position.value["z"]
                 last_pos = right
-                image = AcquireNoBackground(detector, dfbkg, timeout)
+                image = acquire_no_background(detector, dfbkg, timeout)
                 fm_right = Measure(image)
                 logging.debug("Focus level (right) at %f is %f", right, fm_right)
                 focus_levels[right] = fm_right
@@ -414,7 +415,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
                 focus.moveAbsSync({"z": left})
                 left = focus.position.value["z"]
                 last_pos = left
-                image = AcquireNoBackground(detector, dfbkg, timeout)
+                image = acquire_no_background(detector, dfbkg, timeout)
                 fm_left = Measure(image)
                 logging.debug("Focus level (left) at %f is %f", left, fm_left)
                 focus_levels[left] = fm_left
@@ -484,7 +485,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
             future._autofocus_state = FINISHED
 
 
-def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
+def _do_exhaustive_focus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
     """
     Moves the optical focus through the whole given range, measures the focus
     level on each position and ends up where the best focus level was found. In
@@ -510,7 +511,7 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
 
     try:
         # Big timeout, most important being that it's shorter than eternity
-        timeout = 3 + 2 * estimateAcquisitionTime(detector, emt)
+        timeout = 3 + 2 * estimate_acquisition_time(detector, emt)
 
         # use the .depthOfField on detector or emitter as maximum stepsize
         avail_depths = (detector, emt)
@@ -536,16 +537,16 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         if len(detector.shape) > 1:
             if detector.role == 'diagnostic-ccd':
                 logging.debug("Using Spot method to estimate focus")
-                Measure = MeasureSpotsFocus
+                Measure = measure_spots_focus
             elif detector.resolution.value[1] == 1:
                 logging.debug("Using 1d method to estimate focus")
-                Measure = Measure1d
+                Measure = measure_1d
             else:
                 logging.debug("Using Optical method to estimate focus")
-                Measure = MeasureOpticalFocus
+                Measure = measure_optical_focus
         else:
             logging.debug("Using SEM method to estimate focus")
-            Measure = MeasureSEMFocus
+            Measure = measure_sem_focus
 
         # adjust to rng_focus if provided
         rng = focus.axes["z"].range
@@ -573,17 +574,18 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         # The number of steps is the distance to the upper bound divided by the step size.
         for next_pos in numpy.linspace(orig_pos, upper_bound, int((upper_bound - orig_pos) / step)):
             focus.moveAbsSync({"z": next_pos})
-            image = AcquireNoBackground(detector, dfbkg, timeout)
+            image = acquire_no_background(detector, dfbkg, timeout)
             new_fm = Measure(image)
             focus_levels.append(new_fm)
             logging.debug("Focus level at %f is %f", next_pos, new_fm)
             if new_fm >= best_fm:
                 best_fm = new_fm
                 best_pos = next_pos
-            if len(focus_levels) >= 10 and AssessFocus(focus_levels):
+            if len(focus_levels) >= 10 and assess_focus(focus_levels):
                 # trigger binary search on if significant deviation was
                 # found in current position
-                return _DoBinaryFocus(future, detector, emt, focus, dfbkg, best_pos, (best_pos - 2 * step, best_pos + 2 * step))
+                return _do_binary_focus(future, detector, emt, focus, dfbkg, best_pos,
+                                        (best_pos - 2 * step, best_pos + 2 * step))
 
         if future._autofocus_state == CANCELLED:
             raise CancelledError()
@@ -592,24 +594,27 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
         num = max(int((orig_pos - lower_bound) / step), 0)  # Take 0 steps if orig_pos is too close to lower_bound
         for next_pos in numpy.linspace(orig_pos - step, lower_bound, num):
             focus.moveAbsSync({"z": next_pos})
-            image = AcquireNoBackground(detector, dfbkg, timeout)
+            image = acquire_no_background(detector, dfbkg, timeout)
             new_fm = Measure(image)
             focus_levels.append(new_fm)
             logging.debug("Focus level at %f is %f", next_pos, new_fm)
             if new_fm >= best_fm:
                 best_fm = new_fm
                 best_pos = next_pos
-            if len(focus_levels) >= 10 and AssessFocus(focus_levels):
+            if len(focus_levels) >= 10 and assess_focus(focus_levels):
                 # trigger binary search on if significant deviation was
                 # found in current position
-                return _DoBinaryFocus(future, detector, emt, focus, dfbkg, best_pos, (best_pos - 2 * step, best_pos + 2 * step))
+                return _do_binary_focus(future, detector, emt, focus, dfbkg, best_pos,
+                                        (best_pos - 2 * step, best_pos + 2 * step))
 
         if future._autofocus_state == CANCELLED:
             raise CancelledError()
 
-        logging.debug("No significant focus level was found so far, thus we just move to the best position found %f", best_pos)
+        logging.debug("No significant focus level was found so far, thus we just move to the best position found %f",
+                      best_pos)
         focus.moveAbsSync({"z": best_pos})
-        return _DoBinaryFocus(future, detector, emt, focus, dfbkg, best_pos, (best_pos - 2 * step, best_pos + 2 * step))
+        return _do_binary_focus(future, detector, emt, focus, dfbkg, best_pos,
+                                (best_pos - 2 * step, best_pos + 2 * step))
 
     except CancelledError:
         # Go to the best position known so far
@@ -622,7 +627,7 @@ def _DoExhaustiveFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focu
             future._autofocus_state = FINISHED
 
 
-def _CancelAutoFocus(future):
+def _cancel_auto_focus(future):
     """
     Canceller of AutoFocus task.
     """
@@ -637,7 +642,7 @@ def _CancelAutoFocus(future):
     return True
 
 
-def estimateAcquisitionTime(detector, scanner=None):
+def estimate_acquisition_time(detector, scanner=None):
     """
     Estimate how long one acquisition will take
     detector (model.DigitalCamera or model.Detector): Detector on which to
@@ -660,18 +665,17 @@ def estimateAcquisitionTime(detector, scanner=None):
 
 
 # TODO: drop steps, which is unused, or use it
-def estimateAutoFocusTime(detector, scanner=None, steps=MAX_STEPS_NUMBER):
+def estimate_auto_focus_time(detector, scanner=None, steps=MAX_STEPS_NUMBER):
     """
     detector (model.DigitalCamera or model.Detector): Detector on which to
       improve the focus quality
     scanner (None or model.Emitter): In case of a SED this is the scanner used
     Estimates overlay procedure duration
     """
-    return steps * estimateAcquisitionTime(detector, scanner)
+    return steps * estimate_acquisition_time(detector, scanner)
 
 
-def Sparc2AutoFocus(align_mode, opm, streams=None, start_autofocus=True):
-
+def sparc2_auto_focus(align_mode, opm, streams=None, start_autofocus=True):
     """
     It provides the ability to check the progress of the complete Sparc2 autofocus
     procedure in a Future or even cancel it.
@@ -726,7 +730,7 @@ def Sparc2AutoFocus(align_mode, opm, streams=None, start_autofocus=True):
 
     # Get all the detectors, spectrograph and selectors affected by the focuser
     try:
-        spgr, dets, selector = _getSpectrometerFocusingComponents(focuser)  # type: (object, List[Any], Optional[Any])
+        spgr, dets, selector = _get_spectrometer_focusing_components(focuser)  # type:(object, List[Any], Optional[Any])
     except LookupError as ex:
         # TODO: just run the standard autofocus procedure instead?
         raise LookupError("Failed to focus in mode %s: %s" % (align_mode, ex))
@@ -746,8 +750,8 @@ def Sparc2AutoFocus(align_mode, opm, streams=None, start_autofocus=True):
     # * 0.1 s to turn off the light
     if start_autofocus:
         # calculate the time needed for the AutoFocusSpectrometer procedure to be completed
-        af_time = _totalAutoFocusTime(spgr, dets)
-        autofocus_loading_times = (5, 5, af_time, 0.2, 5) # a list with the time that each action needs
+        af_time = _total_auto_focus_time(spgr, dets)
+        autofocus_loading_times = (5, 5, af_time, 0.2, 5)  # a list with the time that each action needs
     else:
         autofocus_loading_times = (5, 5)
 
@@ -755,16 +759,17 @@ def Sparc2AutoFocus(align_mode, opm, streams=None, start_autofocus=True):
     f._autofocus_state = RUNNING
     # Time for each action left
     f._actions_time = list(autofocus_loading_times)
-    f.task_canceller = _CancelSparc2AutoFocus
+    f.task_canceller = _cancel_sparc2_auto_focus
     f._autofocus_lock = threading.Lock()
     f._running_subf = model.InstantaneousFuture()
 
     # Run in separate thread
-    executeAsyncTask(f, _DoSparc2AutoFocus, args=(f, streams, align_mode, opm, dets, spgr, selector, focuser, start_autofocus))
+    executeAsyncTask(f, _do_sparc2_auto_focus,
+                     args=(f, streams, align_mode, opm, dets, spgr, selector, focuser, start_autofocus))
     return f
 
 
-def _cancelSparc2ManualFocus(future):
+def _cancel_sparc2_manual_focus(future):
     """
     Canceller of _DoSparc2ManualFocus task.
     """
@@ -775,7 +780,7 @@ def _cancelSparc2ManualFocus(future):
     return True
 
 
-def Sparc2ManualFocus(opm, bl, align_mode, toggled=True):
+def sparc2_manual_focus(opm, bl, align_mode, toggled=True):
     """
     Provides the ability to check the progress of the Sparc2 manual focus
     procedure in a Future or even cancel it.
@@ -790,18 +795,17 @@ def Sparc2ManualFocus(opm, bl, align_mode, toggled=True):
     f = model.ProgressiveFuture(start=est_start, end=est_start + manual_focus_loading_time)
     # The only goal for using a canceller is to make the progress bar stop
     # as soon as it's cancelled.
-    f.task_canceller = _cancelSparc2ManualFocus
-    executeAsyncTask(f, _DoSparc2ManualFocus, args=(opm, bl, align_mode, toggled))
+    f.task_canceller = _cancel_sparc2_manual_focus
+    executeAsyncTask(f, _do_sparc2_manual_focus, args=(opm, bl, align_mode, toggled))
     return f
 
 
-def _DoSparc2ManualFocus(opm, bl, align_mode, toggled=True):
+def _do_sparc2_manual_focus(opm, bl, align_mode, toggled=True):
     """
     The actual implementation of the manual focus procedure, run asynchronously
     When the manual focus button is toggled:
             - Turn on the light
             - Change the optical path (closing the slit)
-    :param future: the future object that is used to represent the task
     :param opm: OpticalPathManager object
     :param bl: brightlight object
     :param align_mode: OPM mode, spec-focus or spec-fiber-focus, streak-focus
@@ -814,7 +818,7 @@ def _DoSparc2ManualFocus(opm, bl, align_mode, toggled=True):
     f.result()
 
 
-def GetSpectrometerFocusingDetectors(focuser):
+def get_spectrometer_focusing_detectors(focuser):
     """
     Public wrapper around _getSpectrometerFocusingComponents to return detectors only
     :param focuser: (Actuator) the focuser that will be used to change focus
@@ -833,7 +837,7 @@ def GetSpectrometerFocusingDetectors(focuser):
     return dets
 
 
-def _getSpectrometerFocusingComponents(focuser):
+def _get_spectrometer_focusing_components(focuser):
     """
     Finds the different components needed to run auto-focusing with the
     given focuser.
@@ -846,7 +850,7 @@ def _getSpectrometerFocusingComponents(focuser):
     raise LookupError: if not all the components could be found
     """
 
-    dets = GetSpectrometerFocusingDetectors(focuser)
+    dets = get_spectrometer_focusing_detectors(focuser)
     if not dets:
         raise LookupError("Failed to find any detector for the spectrometer focusing")
 
@@ -857,18 +861,18 @@ def _getSpectrometerFocusingComponents(focuser):
 
     # Get the spectrograph and selector based on the fact they affect the
     # same detectors.
-    spgr = _findSameAffects(["spectrograph", "spectrograph-dedicated"], dets)
+    spgr = _find_same_affects(["spectrograph", "spectrograph-dedicated"], dets)
 
     # Only need the selector if there are several detectors
     if len(dets) <= 1:
         selector = None  # we can keep it simple
     else:
-        selector = _findSameAffects(["spec-det-selector", "spec-ded-det-selector"], dets)
+        selector = _find_same_affects(["spec-det-selector", "spec-ded-det-selector"], dets)
 
     return spgr, dets, selector
 
 
-def _findSameAffects(roles, affected):
+def _find_same_affects(roles, affected):
     """
     Find a component that affects all the given components
     comps (list of str): set of component's roles in which to look for the "affecter"
@@ -889,12 +893,13 @@ def _findSameAffects(roles, affected):
         raise LookupError("Failed to find a component that affects all %s" % (naffected,))
 
 
-def _DoSparc2AutoFocus(future, streams, align_mode, opm, dets, spgr, selector, focuser, start_autofocus=True):
+def _do_sparc2_auto_focus(future, streams, align_mode, opm, dets, spgr, selector, focuser, start_autofocus=True):
     """
         cf Sparc2AutoFocus
         return dict((grating, detector) -> focus pos)
     """
-    def updateProgress(subf, start, end):
+
+    def update_progress(subf, start, end):
         """
         Updates the time progress when the current subfuture updates its progress
         """
@@ -909,7 +914,7 @@ def _DoSparc2AutoFocus(future, streams, align_mode, opm, dets, spgr, selector, f
 
         logging.debug("Turning on the light")
         bl = model.getComponent(role="brightlight")
-        _playStream(dets[0], streams)
+        _play_stream(dets[0], streams)
         future._running_subf = light.turnOnLight(bl, dets[0])
         try:
             future._running_subf.result(timeout=60)
@@ -942,7 +947,8 @@ def _DoSparc2AutoFocus(future, streams, align_mode, opm, dets, spgr, selector, f
         # Configure each detector with good settings
         for d in dets:
             # The stream takes care of configuring its detector, so no need
-            # In case there is no streams for the detector, take the binning and exposureTime values as far as they exist
+            # In case there is no streams for the detector, take the binning and exposureTime values as far as they
+            # exist
             if not any(s.detector.role == d.role for s in streams):
                 binning = 1, 1
                 if model.hasVA(d, "binning"):
@@ -957,9 +963,9 @@ def _DoSparc2AutoFocus(future, streams, align_mode, opm, dets, spgr, selector, f
         logging.debug("Running AutoFocusSpectrometer on %s, using %s, for the detectors %s, and using selector %s",
                       spgr, focuser, dets, selector)
         try:
-            future._running_subf = AutoFocusSpectrometer(spgr, focuser, dets, selector, streams)
+            future._running_subf = auto_focus_spectrometer(spgr, focuser, dets, selector, streams)
             et = future._actions_time.pop(0)
-            future._running_subf.add_update_callback(updateProgress)
+            future._running_subf.add_update_callback(update_progress)
             ret = future._running_subf.result(timeout=3 * et + 10)
         except TimeoutError:
             future._running_subf.cancel()
@@ -975,7 +981,7 @@ def _DoSparc2AutoFocus(future, streams, align_mode, opm, dets, spgr, selector, f
 
         logging.debug("Acquiring the last image")
         if streams:
-            _playStream(streams[0].detector, streams)
+            _play_stream(streams[0].detector, streams)
             # Ensure the latest image shows the slit focused
             streams[0].detector.data.get(asap=False)
             # pause the streams
@@ -1012,7 +1018,7 @@ def _DoSparc2AutoFocus(future, streams, align_mode, opm, dets, spgr, selector, f
             future._autofocus_state = FINISHED
 
 
-def _CancelSparc2AutoFocus(future):
+def _cancel_sparc2_auto_focus(future):
     """
     Canceller of _DoSparc2AutoFocus task.
     """
@@ -1028,7 +1034,7 @@ def _CancelSparc2AutoFocus(future):
     return True
 
 
-def AutoFocus(detector, emt, focus, dfbkg=None, good_focus=None, rng_focus=None, method=MTD_BINARY):
+def auto_focus(detector, emt, focus, dfbkg=None, good_focus=None, rng_focus=None, method=MTD_BINARY):
     """
     Wrapper for DoAutoFocus. It provides the ability to check the progress of autofocus
     procedure or even cancel it.
@@ -1053,16 +1059,16 @@ def AutoFocus(detector, emt, focus, dfbkg=None, good_focus=None, rng_focus=None,
     # Create ProgressiveFuture and update its state to RUNNING
     est_start = time.time() + 0.1
     f = model.ProgressiveFuture(start=est_start,
-                                end=est_start + estimateAutoFocusTime(detector, emt))
+                                end=est_start + estimate_auto_focus_time(detector, emt))
     f._autofocus_state = RUNNING
     f._autofocus_lock = threading.Lock()
-    f.task_canceller = _CancelAutoFocus
+    f.task_canceller = _cancel_auto_focus
 
     # Run in separate thread
     if method == MTD_EXHAUSTIVE:
-        autofocus_fn = _DoExhaustiveFocus
+        autofocus_fn = _do_exhaustive_focus
     elif method == MTD_BINARY:
-        autofocus_fn = _DoBinaryFocus
+        autofocus_fn = _do_binary_focus
     else:
         raise ValueError("Unknown autofocus method")
 
@@ -1071,7 +1077,7 @@ def AutoFocus(detector, emt, focus, dfbkg=None, good_focus=None, rng_focus=None,
     return f
 
 
-def AutoFocusSpectrometer(spectrograph, focuser, detectors, selector=None, streams=None):
+def auto_focus_spectrometer(spectrograph, focuser, detectors, selector=None, streams=None):
     """
     Run autofocus for a spectrograph. It will actually run autofocus on each
     gratings, and for each detectors. The input slit should already be in a
@@ -1096,20 +1102,20 @@ def AutoFocusSpectrometer(spectrograph, focuser, detectors, selector=None, strea
         raise ValueError("No selector provided, but multiple detectors")
 
     if streams is None:
-        streams=[]
+        streams = []
 
     # Create ProgressiveFuture and update its state to RUNNING
     est_start = time.time() + 0.1
-    #calculate the time for the AutoFocusSpectrometer procedure to be completed
-    a_time = _totalAutoFocusTime(spectrograph, detectors)
+    # calculate the time for the AutoFocusSpectrometer procedure to be completed
+    a_time = _total_auto_focus_time(spectrograph, detectors)
     f = model.ProgressiveFuture(start=est_start, end=est_start + a_time)
-    f.task_canceller = _CancelAutoFocusSpectrometer
+    f.task_canceller = _cancel_auto_focus_spectrometer
     # Extra info for the canceller
     f._autofocus_state = RUNNING
     f._autofocus_lock = threading.Lock()
     f._subfuture = InstantaneousFuture()
     # Run in separate thread
-    executeAsyncTask(f, _DoAutoFocusSpectrometer, args=(f, spectrograph, focuser, detectors, selector, streams))
+    executeAsyncTask(f, _do_auto_focus_spectrometer, args=(f, spectrograph, focuser, detectors, selector, streams))
     return f
 
 
@@ -1118,10 +1124,10 @@ MOVE_TIME_GRATING = 20  # s
 MOVE_TIME_DETECTOR = 5  # , for the detector selector
 
 
-def _totalAutoFocusTime(spgr, dets):
+def _total_auto_focus_time(spgr, dets):
     ngs = len(spgr.axes["grating"].choices)
     nds = len(dets)
-    et = estimateAutoFocusTime(dets[0], None)
+    et = estimate_auto_focus_time(dets[0], None)
 
     # 1 time for each grating/detector combination, with the gratings changing slowly
     move_et = ngs * MOVE_TIME_GRATING if ngs > 1 else 0
@@ -1130,7 +1136,7 @@ def _totalAutoFocusTime(spgr, dets):
     return (ngs * nds) * et + move_et
 
 
-def _updateAFSProgress(future, af_dur, grating_moves, detector_moves):
+def _update_afs_progress(future, af_dur, grating_moves, detector_moves):
     """
     Update the progress of the future based on duration of the previous autofocus
     future (ProgressiveFuture)
@@ -1142,7 +1148,7 @@ def _updateAFSProgress(future, af_dur, grating_moves, detector_moves):
     future.set_progress(end=time.time() + tleft)
 
 
-def CLSpotsAutoFocus(detector, focus, good_focus=None, rng_focus=None, method=MTD_EXHAUSTIVE):
+def cl_spots_auto_focus(detector, focus, good_focus=None, rng_focus=None, method=MTD_EXHAUSTIVE):
     """
     Wrapper for do auto focus for CL spots. It provides the ability to check the progress of the CL spots auto focus
     procedure in a Future or even cancel it.
@@ -1159,10 +1165,10 @@ def CLSpotsAutoFocus(detector, focus, good_focus=None, rng_focus=None, method=MT
         Focus level
     """
     detector.exposureTime.value = 0.01
-    return AutoFocus(detector, None, focus, good_focus=good_focus, rng_focus=rng_focus, method=method)
+    return auto_focus(detector, None, focus, good_focus=good_focus, rng_focus=rng_focus, method=method)
 
 
-def _mapDetectorToSelector(selector, detectors):
+def _map_detector_to_selector(selector, detectors):
     """
     Maps detector to selector positions
     returns:
@@ -1190,12 +1196,12 @@ def _mapDetectorToSelector(selector, detectors):
 
     if len(det_2_sel) < len(detectors):
         raise ValueError("Failed to find all detectors (%s) in positions of selector axes %s" %
-                  (", ".join(d.name for d in detectors), list(selector.axes.keys())))
+                         (", ".join(d.name for d in detectors), list(selector.axes.keys())))
 
     return sel_axis, det_2_sel
 
 
-def _playStream(detector, streams):
+def _play_stream(detector, streams):
     """
     It first pauses the streams and then plays only the stream related to the corresponding detector
     detector : (model.DigitalCamera or model.Detector): detector from which the image is acquired
@@ -1215,7 +1221,7 @@ def _playStream(detector, streams):
             break
 
 
-def _DoAutoFocusSpectrometer(future, spectrograph, focuser, detectors, selector, streams):
+def _do_auto_focus_spectrometer(future, spectrograph, focuser, detectors, selector, streams):
     """
     cf AutoFocusSpectrometer
     return dict((grating, detector) -> focus pos)
@@ -1223,12 +1229,11 @@ def _DoAutoFocusSpectrometer(future, spectrograph, focuser, detectors, selector,
     ret = {}
     # Record the wavelength and grating position
     pos_orig = {k: v for k, v in spectrograph.position.value.items()
-                              if k in ("wavelength", "grating")}
+                if k in ("wavelength", "grating")}
     gratings = list(spectrograph.axes["grating"].choices.keys())
     if selector:
         sel_orig = selector.position.value
-        sel_axis, det_2_sel = _mapDetectorToSelector(selector, detectors)
-
+        sel_axis, det_2_sel = _map_detector_to_selector(selector, detectors)
 
     def is_current_det(d):
         """
@@ -1297,12 +1302,12 @@ def _DoAutoFocusSpectrometer(future, spectrograph, focuser, detectors, selector,
                 # way off (eg, because it's a simulated detector, or there is
                 # something wrong with the grating), it might prevent this run
                 # from finding the correct value.
-                _playStream(d, streams)
-                future._subfuture = AutoFocus(d, None, focuser)
+                _play_stream(d, streams)
+                future._subfuture = auto_focus(d, None, focuser)
                 fp, flvl = future._subfuture.result()
                 ret[(g, d)] = fp
                 cnts -= 1
-                _updateAFSProgress(future, (time.time() - tstart) * cnts, ngs_moves, nds_moves)
+                _update_afs_progress(future, (time.time() - tstart) * cnts, ngs_moves, nds_moves)
 
                 if future._autofocus_state == CANCELLED:
                     raise CancelledError()
@@ -1320,7 +1325,7 @@ def _DoAutoFocusSpectrometer(future, spectrograph, focuser, detectors, selector,
             future._autofocus_state = FINISHED
 
 
-def _CancelAutoFocusSpectrometer(future):
+def _cancel_auto_focus_spectrometer(future):
     """
     Canceller of _DoAutoFocus task.
     """
@@ -1334,4 +1339,3 @@ def _CancelAutoFocusSpectrometer(future):
         logging.debug("AutofocusSpectrometer cancellation requested.")
 
     return True
-

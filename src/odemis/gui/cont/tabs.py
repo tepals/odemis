@@ -61,11 +61,11 @@ import odemis.gui.util as guiutil
 import odemis.gui.util.align as align
 from odemis import dataio, model
 from odemis.acq import calibration, leech
-from odemis.acq.align import AutoFocus
-from odemis.acq.align.autofocus import Sparc2AutoFocus, Sparc2ManualFocus
+from odemis.acq.align import auto_focus
+from odemis.acq.align.autofocus import sparc2_auto_focus, sparc2_manual_focus
 from odemis.acq.move import getCurrentPositionLabel, IMAGING
 from odemis.gui.conf.util import create_axis_entry
-from odemis.acq.align.autofocus import GetSpectrometerFocusingDetectors
+from odemis.acq.align.autofocus import get_spectrometer_focusing_detectors
 from odemis.acq.stream import OpticalStream, SpectrumStream, TemporalSpectrumStream, \
     CLStream, EMStream, \
     ARStream, CLSettingsStream, ARSettingsStream, MonochromatorSettingsStream, \
@@ -600,7 +600,7 @@ class LocalizationTab(Tab):
                             expt = self.orig_exposureTime * bin_ratio
                             det.exposureTime.value = det.exposureTime.clip(expt)
 
-                self._autofocus_f = AutoFocus(det, emt, self.curr_s.focuser, good_focus=init_focus)
+                self._autofocus_f = auto_focus(det, emt, self.curr_s.focuser, good_focus=init_focus)
                 self._autofocus_f.add_done_callback(self._on_autofocus_done)
             else:
                 # Should never happen as normally the menu/icon are disabled
@@ -1117,7 +1117,7 @@ class SecomStreamsTab(Tab):
                             expt = self.orig_exposureTime * bin_ratio
                             det.exposureTime.value = det.exposureTime.clip(expt)
 
-                self._autofocus_f = AutoFocus(det, emt, self.curr_s.focuser, good_focus=init_focus)
+                self._autofocus_f = auto_focus(det, emt, self.curr_s.focuser, good_focus=init_focus)
                 self._autofocus_f.add_done_callback(self._on_autofocus_done)
             else:
                 # Should never happen as normally the menu/icon are disabled
@@ -5417,7 +5417,7 @@ class Sparc2AlignTab(Tab):
         :return: all created focus streams
         """
         focus_streams = []
-        dets = GetSpectrometerFocusingDetectors(focuser)
+        dets = get_spectrometer_focusing_detectors(focuser)
 
         # Sort to have the first stream corresponding to the same detector as the
         # stream in the alignment view. As this stream will be used for showing
@@ -5568,7 +5568,7 @@ class Sparc2AlignTab(Tab):
                     self._enableFocusComponents(manual=True, ccd_stream=False)
                 self._stream_controller.pauseStreams()
 
-            self._mf_future = Sparc2ManualFocus(main.opm, bl, opath, toggled=True)
+            self._mf_future = sparc2_manual_focus(main.opm, bl, opath, toggled=True)
             self._mf_future.add_done_callback(self._onManualFocusReady)
             # Update GUI
             self._pfc_manual_focus = ProgressiveFutureConnector(self._mf_future, gauge)
@@ -5579,7 +5579,7 @@ class Sparc2AlignTab(Tab):
             # Get the optical path from align mode
             opath = self._mode_to_opm[align_mode]
 
-            self._mf_future = Sparc2ManualFocus(main.opm, bl, opath, toggled=False)
+            self._mf_future = sparc2_manual_focus(main.opm, bl, opath, toggled=False)
             self._mf_future.add_done_callback(self._onManualFocusFinished)
             # Update GUI
             self._pfc_manual_focus = ProgressiveFutureConnector(self._mf_future, gauge)
@@ -5633,7 +5633,7 @@ class Sparc2AlignTab(Tab):
             self._stream_controller.pauseStreams()
 
             # No manual autofocus for now
-            self._autofocus_f = Sparc2AutoFocus(focus_mode, main.opm, ss, start_autofocus=True)
+            self._autofocus_f = sparc2_auto_focus(focus_mode, main.opm, ss, start_autofocus=True)
             self._autofocus_align_mode = align_mode
             self._autofocus_f.add_done_callback(self._on_autofocus_done)
 

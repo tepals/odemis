@@ -139,7 +139,7 @@ class TimelapsePlugin(Plugin):
         # It should be at least as long as the acquisition time of all the streams
         tot_time = 0
         for s in self._get_acq_streams()[0]:
-            acqt = s.estimateAcquisitionTime()
+            acqt = s.estimate_acquisition_time()
             # Normally we round-up in order to be pessimistic on the duration,
             # but here it's better to be a little optimistic and allow the user
             # to pick a really short period (if each stream has a very short
@@ -425,7 +425,7 @@ class TimelapsePlugin(Plugin):
         st._shouldUpdateHistogram = lambda: None
         self._data_received = 0
 
-        dur_one = st.estimateAcquisitionTime() - Stream.SETUP_OVERHEAD
+        dur_one = st.estimate_acquisition_time() - Stream.SETUP_OVERHEAD
 
         # Function that will be called after each new raw data has been received
         def store_raw_data():

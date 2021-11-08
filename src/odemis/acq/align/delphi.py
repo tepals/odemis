@@ -31,7 +31,7 @@ from numpy import array, linalg
 import numpy
 from odemis import model
 from odemis.acq.align import transform, spot, autofocus, FindOverlay
-from odemis.acq.align.autofocus import AcquireNoBackground, MTD_EXHAUSTIVE
+from odemis.acq.align.autofocus import acquire_no_background, MTD_EXHAUSTIVE
 from odemis.acq.drift import MeasureShift
 from odemis.dataio import tiff
 from odemis.util import img, executeAsyncTask
@@ -498,8 +498,8 @@ def _DoDelphiCalibration(future, main_data):
             det_dataflow = main_data.bsd.data
             if future._task_state == CANCELLED:
                 raise CancelledError()
-            future.running_subf = autofocus.AutoFocus(main_data.ccd, None, main_data.focus, dfbkg=det_dataflow,
-                                                      rng_focus=FOCUS_RANGE, method=MTD_EXHAUSTIVE)
+            future.running_subf = autofocus.auto_focus(main_data.ccd, None, main_data.focus, dfbkg=det_dataflow,
+                                                       rng_focus=FOCUS_RANGE, method=MTD_EXHAUSTIVE)
             future.running_subf.result()
             ofoc = main_data.focus.position.value["z"]
             calib_values["optical_focus"] = ofoc
@@ -843,7 +843,7 @@ def _DoRotationAndScaling(future, ccd, detector, escan, sem_stage, opt_stage, fo
             raise CancelledError()
 
         ccd.binning.value = (1, 1)
-        image = AcquireNoBackground(ccd, det_dataflow)
+        image = acquire_no_background(ccd, det_dataflow)
         if logpath:
             tiff.export(os.path.join(logpath, "twin_stage_spot_%d.tiff" % (n + 1,)),
                         [image])
@@ -888,8 +888,8 @@ def _DoRotationAndScaling(future, ccd, detector, escan, sem_stage, opt_stage, fo
                 except LookupError:
                     # If failed to find spot, try first to focus
                     ccd.binning.value = ccd.binning.clip((8, 8))
-                    future._autofocus_f = autofocus.AutoFocus(ccd, None, focus, dfbkg=det_dataflow,
-                                                              rng_focus=FOCUS_RANGE, method=MTD_EXHAUSTIVE)
+                    future._autofocus_f = autofocus.auto_focus(ccd, None, focus, dfbkg=det_dataflow,
+                                                               rng_focus=FOCUS_RANGE, method=MTD_EXHAUSTIVE)
                     future._autofocus_f.result()
                     if future._task_state == CANCELLED:
                         raise CancelledError()
@@ -1070,7 +1070,7 @@ def _DoHoleDetection(future, detector, escan, sem_stage, ebeam_focus, manual=Fal
             f = detector.applyAutoContrast()
             f.result()
             detector.data.unsubscribe(_discard_data)
-            future._autofocus_f = autofocus.AutoFocus(detector, escan, ebeam_focus)
+            future._autofocus_f = autofocus.auto_focus(detector, escan, ebeam_focus)
             h_focus, fm_level = future._autofocus_f.result()
 
             return h_focus

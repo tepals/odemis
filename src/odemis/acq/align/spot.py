@@ -29,7 +29,7 @@ import math
 import numpy
 from odemis import model
 from odemis.acq.align import coordinates, autofocus
-from odemis.acq.align.autofocus import AcquireNoBackground, MTD_EXHAUSTIVE
+from odemis.acq.align.autofocus import acquire_no_background, MTD_EXHAUSTIVE
 from odemis.dataio import tiff
 from odemis.util import executeAsyncTask
 from odemis.util.spot import FindCenterCoordinates, GridPoints, MaximaFind, EstimateLatticeConstant
@@ -159,11 +159,11 @@ def _DoAlignSpot(future, ccd, stage, escan, focus, type, dfbkg, rng_f, logpath):
             # TODO: all this code to decide whether to pick exposure 0.3 or 1.5?
             # => KISS! Use always 1s... or allow up to 5s?
             # Estimate noise and adjust exposure time based on "Rose criterion"
-            image = AcquireNoBackground(ccd, dfbkg)
+            image = acquire_no_background(ccd, dfbkg)
             snr = MeasureSNR(image)
             while snr < 5 and ccd.exposureTime.value < 1.5:
                 ccd.exposureTime.value = ccd.exposureTime.value + 0.2
-                image = AcquireNoBackground(ccd, dfbkg)
+                image = acquire_no_background(ccd, dfbkg)
                 snr = MeasureSNR(image)
             logging.debug("Using exposure time of %g s", ccd.exposureTime.value)
             if logpath:
@@ -187,7 +187,7 @@ def _DoAlignSpot(future, ccd, stage, escan, focus, type, dfbkg, rng_f, logpath):
                     # When Autofocus set binning 8 if possible, and use exhaustive
                     # method to be sure not to miss the spot.
                     ccd.binning.value = ccd.binning.clip((8, 8))
-                    future._autofocusf = autofocus.AutoFocus(ccd, None, focus, dfbkg, rng_focus=rng_f, method=MTD_EXHAUSTIVE)
+                    future._autofocusf = autofocus.auto_focus(ccd, None, focus, dfbkg, rng_focus=rng_f, method=MTD_EXHAUSTIVE)
                     lens_pos, fm_level = future._autofocusf.result()
                     # Update progress of the future
                     future.set_progress(end=time.time() +
@@ -209,7 +209,7 @@ def _DoAlignSpot(future, ccd, stage, escan, focus, type, dfbkg, rng_f, logpath):
 
             if dist is not None:
                 if logpath:
-                    image = AcquireNoBackground(ccd, dfbkg)
+                    image = acquire_no_background(ccd, dfbkg)
                     tiff.export(os.path.join(logpath, "align_spot_found.tiff"), [image])
                 break
         else:
@@ -288,7 +288,7 @@ def estimateAlignmentTime(et, dist=None, n_autofocus=2):
     n_autofocus (int): number of autofocus procedures
     returns (float):  process estimated time #s
     """
-    return estimateCenterTime(et, dist) + n_autofocus * autofocus.estimateAutoFocusTime(et)  # s
+    return estimateCenterTime(et, dist) + n_autofocus * autofocus.estimate_auto_focus_time(et)  # s
 
 
 def _set_blanker(escan, active):
@@ -426,7 +426,7 @@ def CropFoV(ccd, dfbkg=None):
     on AutoFocus process.
     ccd (model.DigitalCamera): The CCD
     """
-    image = AcquireNoBackground(ccd, dfbkg)
+    image = acquire_no_background(ccd, dfbkg)
     center_pxs = ((image.shape[1] / 2),
                   (image.shape[0] / 2))
 
@@ -509,7 +509,7 @@ def _DoCenterSpot(future, ccd, stage, escan, mx_steps, type, dfbkg, logpath):
                 raise CancelledError()
 
             # Wait to make sure no previous spot is detected
-            image = AcquireNoBackground(ccd, dfbkg)
+            image = acquire_no_background(ccd, dfbkg)
             if logpath:
                 tiff.export(os.path.join(logpath, "center_spot_%d.tiff" % (steps,)), [image])
 

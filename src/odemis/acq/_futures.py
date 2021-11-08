@@ -89,7 +89,7 @@ class SimpleStreamFuture(futures.Future):
         returns (list of DataArray): acquisition data
         raises CancelledError if the acquisition was cancelled
         """
-        estt = self._stream.estimateAcquisitionTime()
+        estt = self._stream.estimate_acquisition_time()
 
         # The standard is_active acquisition doesn't care about the leeches,
         # so when imitating .acquire(), we need to call the leeches too.

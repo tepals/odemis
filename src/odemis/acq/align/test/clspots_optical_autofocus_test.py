@@ -85,7 +85,7 @@ class TestAutofocusSim(unittest.TestCase):
         center_position = 17e-6
         self.ofocus.moveAbs({"z": center_position}).result()
         # Run auto focus
-        future_focus = align.autofocus.CLSpotsAutoFocus(self.diagnostic_cam, self.ofocus)
+        future_focus = align.autofocus.cl_spots_auto_focus(self.diagnostic_cam, self.ofocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         # Check that the auto focus converged to the correct position and the stage moved to the correct position
         numpy.testing.assert_allclose(foc_pos, good_focus, atol=0.5e-6)
@@ -102,7 +102,7 @@ class TestAutofocusSim(unittest.TestCase):
         center_position = 32e-6
         self.ofocus.moveAbs({"z": center_position}).result()
         # Run auto focus
-        future_focus = align.autofocus.CLSpotsAutoFocus(self.diagnostic_cam, self.ofocus)
+        future_focus = align.autofocus.cl_spots_auto_focus(self.diagnostic_cam, self.ofocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         # Check that the auto focus converged to the correct position and the stage moved to the correct position
         numpy.testing.assert_allclose(foc_pos, good_focus, atol=0.5e-6)
@@ -115,7 +115,7 @@ class TestAutofocusSim(unittest.TestCase):
         center_position = 17e-6
         self.ofocus.moveAbs({"z": center_position}).result()
         # Run auto focus
-        future_focus = align.autofocus.CLSpotsAutoFocus(self.diagnostic_cam, self.ofocus)
+        future_focus = align.autofocus.cl_spots_auto_focus(self.diagnostic_cam, self.ofocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         # Check that the auto focus converged to the correct position and the stage moved to the correct position
         numpy.testing.assert_allclose(foc_pos, good_focus, atol=0.5e-6)
@@ -135,7 +135,7 @@ class TestAutofocusSim(unittest.TestCase):
             logging.debug("start position {}, good focus {}".format(start_position, good_focus))
             self.diagnostic_cam.updateMetadata({model.MD_FAV_POS_ACTIVE: {"z": good_focus}})
             # run auto focus
-            future_focus = align.autofocus.CLSpotsAutoFocus(self.diagnostic_cam, self.ofocus)
+            future_focus = align.autofocus.cl_spots_auto_focus(self.diagnostic_cam, self.ofocus)
             foc_pos, foc_lev = future_focus.result(timeout=900)
             logging.debug("found focus at {} good focus at {}".format(foc_pos, good_focus))
             numpy.testing.assert_allclose(foc_pos, good_focus, atol=0.5e-6)
@@ -187,7 +187,7 @@ class TestAutofocusHW(unittest.TestCase):
         self.ofocus.moveAbs({"z": center_position}).result()
         numpy.testing.assert_allclose(self.ofocus.position.value["z"], center_position, atol=1e-7)
         # run autofocus
-        future_focus = align.AutoFocus(self.diagnostic_cam, None, self.ofocus)
+        future_focus = align.auto_focus(self.diagnostic_cam, None, self.ofocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         # Test if the correct focus position was found.
         logging.debug("found focus at {} good focus at {}".format(foc_pos, self._optimal_focus))
@@ -207,7 +207,7 @@ class TestAutofocusHW(unittest.TestCase):
                 self.ofocus.moveAbs({"z": start_position}).result()
                 numpy.testing.assert_allclose(self.ofocus.position.value["z"], start_position, atol=1e-6)
                 # run autofocus
-                future_focus = align.AutoFocus(self.diagnostic_cam, None, self.ofocus)
+                future_focus = align.auto_focus(self.diagnostic_cam, None, self.ofocus)
                 foc_pos, foc_lev = future_focus.result(timeout=900)
                 # Test if the correct focus position was found.
                 logging.debug("found focus at {} good focus at {}".format(foc_pos, self._optimal_focus))
@@ -230,7 +230,7 @@ class TestAutofocusHW(unittest.TestCase):
         # check that it moved to the correct starting position
         numpy.testing.assert_allclose(self.ofocus.position.value["z"], start_position, atol=1e-7)
         # Run autofocus
-        future_focus = align.AutoFocus(self.diagnostic_cam, None, self.ofocus)
+        future_focus = align.auto_focus(self.diagnostic_cam, None, self.ofocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         # Test that the correct focus has been found.
         logging.debug("found focus at {} good focus at {}".format(foc_pos, self._optimal_focus))

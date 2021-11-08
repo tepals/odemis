@@ -27,7 +27,7 @@ import math
 import numpy
 from odemis import model, dataio
 from odemis.acq import acqmng
-from odemis.acq.align.autofocus import MeasureOpticalFocus, AutoFocus, MTD_EXHAUSTIVE
+from odemis.acq.align.autofocus import measure_optical_focus, auto_focus, MTD_EXHAUSTIVE
 from odemis.acq.stitching._constants import WEAVER_MEAN, REGISTER_IDENTITY, REGISTER_GLOBAL_SHIFT
 from odemis.acq.stitching._simple import register, weave
 from odemis.acq.stream import Stream, SEMStream, CameraStream, RepetitionStream, EMStream, ARStream, \
@@ -581,7 +581,7 @@ class TiledAcquisitionTask(object):
             logging.debug("Skipping focus adjustment..")
             return das
         try:
-            current_focus_level = MeasureOpticalFocus(das[self._streams.index(self._focus_stream)])
+            current_focus_level = measure_optical_focus(das[self._streams.index(self._focus_stream)])
         except IndexError:
             logging.warning("Failed to get image to measure focus on.")
             return das
@@ -595,12 +595,12 @@ class TiledAcquisitionTask(object):
         # Run autofocus if current focus got worse than permitted deviation
         if abs(current_focus_level - self._good_focus_level) / self._good_focus_level > FOCUS_FIDELITY:
             try:
-                self._future.running_subf = AutoFocus(self._focus_stream.detector,
-                                                      self._focus_stream.emitter,
-                                                      self._focus_stream.focuser,
-                                                      good_focus=self._good_focus,
-                                                      rng_focus=self._focus_rng,
-                                                      method=MTD_EXHAUSTIVE)
+                self._future.running_subf = auto_focus(self._focus_stream.detector,
+                                                       self._focus_stream.emitter,
+                                                       self._focus_stream.focuser,
+                                                       good_focus=self._good_focus,
+                                                       rng_focus=self._focus_rng,
+                                                       method=MTD_EXHAUSTIVE)
                 self._future.running_subf.result()  # blocks until autofocus is finished
                 if self._future._task_state == CANCELLED:
                     raise CancelledError()

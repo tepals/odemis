@@ -30,7 +30,7 @@ from odemis import model, acq
 import odemis
 from odemis.acq import align, stream
 from odemis.acq.align import autofocus
-from odemis.acq.align.autofocus import Sparc2AutoFocus, MTD_BINARY
+from odemis.acq.align.autofocus import sparc2_auto_focus, MTD_BINARY
 from odemis.dataio import hdf5
 from odemis.util import test, timeout, img
 import os
@@ -105,10 +105,10 @@ class TestAutofocus(unittest.TestCase):
         data[0].shape = Y, X
         input = data[0]
 
-        prev_res = autofocus.MeasureSEMFocus(input)
+        prev_res = autofocus.measure_sem_focus(input)
         for i in range(1, 10, 1):
             blur = ndimage.gaussian_filter(input, sigma=i)
-            res = autofocus.MeasureSEMFocus(blur)
+            res = autofocus.measure_sem_focus(blur)
             self.assertGreater(prev_res, res)
             prev_res = res
 
@@ -123,7 +123,7 @@ class TestAutofocus(unittest.TestCase):
         ccd = self.ccd
         focus.moveAbs({"z": self._opt_good_focus - 400e-6}).result()
         ccd.exposureTime.value = ccd.exposureTime.range[0]
-        future_focus = align.AutoFocus(ccd, ebeam, focus)
+        future_focus = align.auto_focus(ccd, ebeam, focus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         self.assertAlmostEqual(foc_pos, self._opt_good_focus, 3)
         self.assertGreater(foc_lev, 0)
@@ -135,7 +135,7 @@ class TestAutofocus(unittest.TestCase):
         """
         self.efocus.moveAbs({"z": self._sem_good_focus - 100e-06}).result()
         self.ebeam.dwellTime.value = self.ebeam.dwellTime.range[0]
-        future_focus = align.AutoFocus(self.sed, self.ebeam, self.efocus)
+        future_focus = align.auto_focus(self.sed, self.ebeam, self.efocus)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         self.assertAlmostEqual(foc_pos, self._sem_good_focus, 3)
         self.assertGreater(foc_lev, 0)
@@ -148,8 +148,8 @@ class TestAutofocus(unittest.TestCase):
         self.efocus.moveAbs({"z": self._sem_good_focus + 200e-06}).result()
         self.ebeam.dwellTime.value = self.ebeam.dwellTime.range[0]
         # We don't give exactly the good focus position, to make it a little harder
-        future_focus = align.AutoFocus(self.sed, self.ebeam, self.efocus,
-                                       good_focus=self._sem_good_focus + 100e-9)
+        future_focus = align.auto_focus(self.sed, self.ebeam, self.efocus,
+                                        good_focus=self._sem_good_focus + 100e-9)
         foc_pos, foc_lev = future_focus.result(timeout=900)
         self.assertAlmostEqual(foc_pos, self._sem_good_focus, 3)
         self.assertGreater(foc_lev, 0)
@@ -218,7 +218,7 @@ class TestSparc2AutoFocus(unittest.TestCase):
         new_img = img.ensure2DImage(data[0])
         self.ccd.set_image(new_img)
 
-        f = Sparc2AutoFocus("spec-fiber-focus", self.optmngr, [self.specline_spccd], True)
+        f = sparc2_auto_focus("spec-fiber-focus", self.optmngr, [self.specline_spccd], True)
 
         time.sleep(5)
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-on-slit-spccd-simple.ome.tiff"))
@@ -242,7 +242,7 @@ class TestSparc2AutoFocus(unittest.TestCase):
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-off-slit-spccd-simple.ome.tiff"))
         new_img = img.ensure2DImage(data[0])
         self.ccd.set_image(new_img)
-        f = Sparc2AutoFocus("spec-fiber-focus", self.optmngr, [self.specline_spccd], True)
+        f = sparc2_auto_focus("spec-fiber-focus", self.optmngr, [self.specline_spccd], True)
 
         time.sleep(5)
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-on-slit-spccd-simple.ome.tiff"))
@@ -270,7 +270,7 @@ class TestSparc2AutoFocus(unittest.TestCase):
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-off-slit-spccd-simple.ome.tiff"))
         new_img = img.ensure2DImage(data[0])
         self.ccd.set_image(new_img)
-        f = Sparc2AutoFocus("spec-fiber-focus", self.optmngr, specline_mul, True)
+        f = sparc2_auto_focus("spec-fiber-focus", self.optmngr, specline_mul, True)
 
         time.sleep(5)
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-on-slit-spccd-simple.ome.tiff"))
@@ -348,7 +348,7 @@ class TestSparc2AutoFocus_2(unittest.TestCase):
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-off-slit-spccd-simple.ome.tiff"))
         new_img = img.ensure2DImage(data[0])
         self.spccd.set_image(new_img)
-        f = Sparc2AutoFocus("spec-focus", self.optmngr, [self.specline_ccd], True)
+        f = sparc2_auto_focus("spec-focus", self.optmngr, [self.specline_ccd], True)
 
         time.sleep(5)
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-on-slit-spccd-simple.ome.tiff"))
@@ -372,7 +372,7 @@ class TestSparc2AutoFocus_2(unittest.TestCase):
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-off-slit-spccd-simple.ome.tiff"))
         new_img = img.ensure2DImage(data[0])
         self.spccd.set_image(new_img)
-        f = Sparc2AutoFocus("spec-focus", self.optmngr, [self.specline_ccd], True)
+        f = sparc2_auto_focus("spec-focus", self.optmngr, [self.specline_ccd], True)
 
         time.sleep(5)
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-on-slit-spccd-simple.ome.tiff"))
@@ -398,7 +398,7 @@ class TestSparc2AutoFocus_2(unittest.TestCase):
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-off-slit-spccd-simple.ome.tiff"))
         new_img = img.ensure2DImage(data[0])
         self.spccd.set_image(new_img)
-        f = Sparc2AutoFocus("spec-focus", self.optmngr, specline_mul, True)
+        f = sparc2_auto_focus("spec-focus", self.optmngr, specline_mul, True)
 
         time.sleep(5)
         data = tiff.read_data(os.path.join(TEST_IMAGE_PATH, "brightlight-on-slit-spccd-simple.ome.tiff"))
@@ -471,7 +471,7 @@ class TestSparc2AutoFocus_3(unittest.TestCase):
         """
         Test AutoFocus Spectrometer on CCD
         """
-        f = Sparc2AutoFocus("spec-focus", self.optmngr, [self.specline_ccd], True)
+        f = sparc2_auto_focus("spec-focus", self.optmngr, [self.specline_ccd], True)
         res = f.result(timeout=900)
         for (g, d), fpos in res.items():
             self.assertIn(d.role, {"ccd0", "sp-ccd1"})
@@ -482,7 +482,7 @@ class TestSparc2AutoFocus_3(unittest.TestCase):
         """
         Test AutoFocus Spectrometer on CCD
         """
-        f = Sparc2AutoFocus("spec-fiber-focus", self.optmngr, [self.specline_spccd], True)
+        f = sparc2_auto_focus("spec-fiber-focus", self.optmngr, [self.specline_spccd], True)
         res = f.result(timeout=900)
         for (g, d), fpos in res.items():
             self.assertIn(d.role, {"sp-ccd2", "sp-ccd3"})
@@ -496,7 +496,7 @@ class TestSparc2AutoFocus_3(unittest.TestCase):
         """
         self.focus.moveAbs({"z": self._good_focus - 200e-6}).result()
 
-        f = Sparc2AutoFocus("spec-focus", self.optmngr, [self.specline_ccd], True)
+        f = sparc2_auto_focus("spec-focus", self.optmngr, [self.specline_ccd], True)
 
         time.sleep(5)
 
@@ -557,7 +557,7 @@ class TestAutofocusSpectrometer(unittest.TestCase):
         Test AutoFocus Spectrometer on CCD
         """
         self.focus.moveAbs({"z": self._good_focus - 200e-6}).result()
-        f = align.AutoFocusSpectrometer(self.spgr, self.focus, self.ccd)
+        f = align.auto_focus_spectrometer(self.spgr, self.focus, self.ccd)
         res = f.result(timeout=900)
         for (g, d), fpos in res.items():
             self.assertIs(d, self.ccd)
@@ -571,7 +571,7 @@ class TestAutofocusSpectrometer(unittest.TestCase):
         Test cancelling does cancel (relatively quickly)
         """
         self.focus.moveAbs({"z": self._good_focus + 400e-6}).result()
-        f = align.AutoFocusSpectrometer(self.spgr, self.focus, [self.ccd])
+        f = align.auto_focus_spectrometer(self.spgr, self.focus, [self.ccd])
         time.sleep(2)
         f.cancel()
         self.assertTrue(f.cancelled())
@@ -587,7 +587,7 @@ class TestAutofocusSpectrometer(unittest.TestCase):
         # (cf optical path mode "spec-focus") and activating an energy source
 
         self.focus.moveAbs({"z": self._good_focus + 400e-6}).result()
-        f = align.AutoFocusSpectrometer(self.spgr, self.focus, [self.ccd, self.spccd], self.selector)
+        f = align.auto_focus_spectrometer(self.spgr, self.focus, [self.ccd, self.spccd], self.selector)
         res = f.result(timeout=900)
         for (g, d), fpos in res.items():
             self.assertIn(d, (self.ccd, self.spccd))
@@ -650,7 +650,7 @@ class TestAutofocus1d(unittest.TestCase):
         new_img = img.ensure2DImage(data[0])
         self.ccd.set_image(new_img)
         self.focus.moveAbs({"z": self._good_focus - 200e-6}).result()
-        f = align.AutoFocus(self.spectrometer, None, self.focus, method=MTD_BINARY)
+        f = align.auto_focus(self.spectrometer, None, self.focus, method=MTD_BINARY)
         foc_pos, foc_lev = f.result(timeout=900)
         logging.debug("Found focus at {} good focus at {}".format(foc_pos, self._good_focus))
         # The focus step size is 10.9e-6, the tolerance is set to 2.5e-5; approximately two focus steps.
@@ -667,13 +667,13 @@ class TestAutofocus1d(unittest.TestCase):
         self.ccd.set_image(new_img)
         self.spectrometer.binning.value = (4, 64)
         self.focus.moveAbs({"z": self._good_focus - 200e-6}).result()
-        f = align.AutoFocus(self.spectrometer, None, self.focus, method=MTD_BINARY)
+        f = align.auto_focus(self.spectrometer, None, self.focus, method=MTD_BINARY)
         foc_pos, foc_lev = f.result(timeout=900)
         logging.debug("Found focus at {} good focus at {}".format(foc_pos, self._good_focus))
         # The focus step size is 10.9e-6, the tolerance is set to 2.5e-5; approximately two focus steps.
         numpy.testing.assert_allclose(foc_pos, self._good_focus, atol=2.5e-5)
         self.focus.moveAbs({"z": self._good_focus + 400e-6}).result()
-        f = align.AutoFocus(self.spectrometer, None, self.focus, method=MTD_BINARY)
+        f = align.auto_focus(self.spectrometer, None, self.focus, method=MTD_BINARY)
         foc_pos, foc_lev = f.result(timeout=900)
         logging.debug("Found focus at {} good focus at {}".format(foc_pos, self._good_focus))
         # The focus step size is 10.9e-6, the tolerance is set to 2.5e-5; approximately two focus steps.

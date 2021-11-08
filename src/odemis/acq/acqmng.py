@@ -196,7 +196,7 @@ class ZStackAcquisitionTask(object):
                 if data:
                     acquired_data.append(data[0])
                 # update the remaining time
-                remaining_t -= stream.estimateAcquisitionTime()
+                remaining_t -= stream.estimate_acquisition_time()
                 self._main_future.set_end_time(time.time() + remaining_t)
 
             else: 
@@ -242,7 +242,7 @@ class ZStackAcquisitionTask(object):
                     if data:
                         zstack.append(data[0])
                     # update the remaining time
-                    remaining_t -= stream.estimateAcquisitionTime()
+                    remaining_t -= stream.estimate_acquisition_time()
                     self._main_future.set_end_time(time.time() + remaining_t)
 
                 zcube = assembleZCube(zstack, self._zlevels[stream])
@@ -267,9 +267,9 @@ def estimateZStackAcquisitionTime(streams, zlevels):
     acq_time = 0
     for s in streams:
         if s in zlevels.keys():
-            acq_time += s.estimateAcquisitionTime() * len(zlevels[s])
+            acq_time += s.estimate_acquisition_time() * len(zlevels[s])
         else:
-            acq_time += s.estimateAcquisitionTime() 
+            acq_time += s.estimate_acquisition_time()
     for s in streams:
         zs = zlevels.get(s, [0])  # concider that streams without zlevels are acquired at a single z
         if len(zs) > 1 and s.focuser:
@@ -291,7 +291,7 @@ def estimateTime(streams):
     # We don't use foldStreams() as it creates new streams at every call, and
     # anyway sum of each stream should give already a good estimation.
     for s in streams:
-        tot_time += s.estimateAcquisitionTime()
+        tot_time += s.estimate_acquisition_time()
 
     return tot_time
 
@@ -457,7 +457,7 @@ class AcquisitionTask(object):
         # get the estimated time for each streams
         self._streamTimes = {} # Stream -> float (estimated time)
         for s in streams:
-            self._streamTimes[s] = s.estimateAcquisitionTime()
+            self._streamTimes[s] = s.estimate_acquisition_time()
 
         self._streams_left = set(self._streams) # just for progress update
         self._current_stream = None

@@ -438,7 +438,7 @@ class MonoScanPlugin(Plugin):
         """
         expt = self._mchr_s.estimateAcquisitionTime()
         if self._survey_s:
-            expt += self._survey_s.estimateAcquisitionTime()
+            expt += self._survey_s.estimate_acquisition_time()
 
         # Use _set_value as it's read only
         self.expectedDuration._set_value(expt, force_write=True)

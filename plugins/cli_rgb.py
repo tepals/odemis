@@ -186,10 +186,10 @@ class RGBCLIntensity(Plugin):
         dt_drift = 0
 
         if self._survey_s:
-            dt_survey = self._survey_s.estimateAcquisitionTime()
+            dt_survey = self._survey_s.estimate_acquisition_time()
 
         if self._cl_int_s:
-            dt_cl = self._cl_int_s.estimateAcquisitionTime()
+            dt_cl = self._cl_int_s.estimate_acquisition_time()
 
         # For each CL filter acquisition, the drift correction will run once
         # (*in addition* to the standard in-frame drift correction)

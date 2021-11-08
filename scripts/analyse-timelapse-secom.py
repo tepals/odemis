@@ -64,13 +64,13 @@ def read_timelapse(infn, emfn, fmfn):
                     fmdate = da.metadata[model.MD_ACQ_DATE]
                     fmda = da
                     fmpxs = da.metadata[model.MD_PIXEL_SIZE]
-                    fmfoc = autofocus.MeasureOpticalFocus(da)
+                    fmfoc = autofocus.measure_optical_focus(da)
                 else: # SEM
                     empos = da.metadata[model.MD_POS]
                     emdate = da.metadata[model.MD_ACQ_DATE]
                     emda = da
                     empxs = da.metadata[model.MD_PIXEL_SIZE]
-                    emfoc = autofocus.MeasureSEMFocus(da)
+                    emfoc = autofocus.measure_sem_focus(da)
             
             # Overlay translation
             ovlpos = fmpos[0] - empos[0], fmpos[1] - empos[1]

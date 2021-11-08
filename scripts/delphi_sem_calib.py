@@ -53,7 +53,7 @@ def main(args):
         if options.focus:
             efocus = model.getComponent(role="ebeam-focus")
             efocus.moveAbs({"z": delphi.SEM_KNOWN_FOCUS}).result()
-            f = autofocus.AutoFocus(bsd, escan, efocus)
+            f = autofocus.auto_focus(bsd, escan, efocus)
             focus, fm_level = f.result()
             print("SEM focused @ %g m" % (focus,))
 

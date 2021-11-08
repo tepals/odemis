@@ -775,7 +775,7 @@ class Correlator2D(Plugin):
         at = self._correlator_s.estimateAcquisitionTime()
 
         if self._survey_s:
-            at += self._survey_s.estimateAcquisitionTime()
+            at += self._survey_s.estimate_acquisition_time()
 
         # Use _set_value as it's read only
         self.expectedDuration._set_value(round(at), force_write=True)

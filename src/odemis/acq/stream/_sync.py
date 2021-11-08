@@ -271,7 +271,7 @@ class MultipleDetectorStream(with_metaclass(ABCMeta, Stream)):
                 if integration_count > 1:
                     shape = (len(pol_pos), rep[1], rep[0], integration_count)  # overwrite shape
 
-            l_time = l.estimateAcquisitionTime(dt, shape)
+            l_time = l.estimate_acquisition_time(dt, shape)
             total_time += l_time
             logging.debug("Estimated overhead time for leech %s: %g s / %g s",
                           type(l), l_time, total_time)
@@ -773,7 +773,7 @@ class MultipleDetectorStream(with_metaclass(ABCMeta, Stream)):
         leech_time = 0  # how much time leeches will cost
         for l in self.leeches:
             try:
-                leech_time += l.estimateAcquisitionTime(img_time, shape)
+                leech_time += l.estimate_acquisition_time(img_time, shape)
                 nimg = l.start(img_time, shape)  # nimg = next image = counter until execution
             except Exception:
                 logging.exception("Leech %s failed to start, will be disabled for this sub acquisition", l)
@@ -2541,7 +2541,7 @@ class ScannedFluoMDStream(MultipleDetectorStream):
          correction
         """
         # It takes the same time as just one stream
-        return self.streams[0].estimateAcquisitionTime()
+        return self.streams[0].estimate_acquisition_time()
 
     def estimateAcquisitionTime(self):
         # No drift correction supported => easy
