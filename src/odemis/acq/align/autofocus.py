@@ -170,6 +170,27 @@ def measure_spots_focus(image):
     return sobel_image.var()
 
 
+def get_focus_measure(detector):
+    # Pick measurement method based on the heuristics that SEM detectors
+    # are typically just a point (ie, shape == data depth).
+    # TODO: is this working as expected? Alternatively, we could check
+    # MD_DET_TYPE.
+    if len(detector.shape) > 1:
+        if detector.role == 'diagnostic-ccd':
+            logging.debug("Using Spot method to estimate focus")
+            Measure = measure_spots_focus
+        elif detector.resolution.value[1] == 1:
+            logging.debug("Using 1d method to estimate focus")
+            Measure = measure_1d
+        else:
+            logging.debug("Using Optical method to estimate focus")
+            Measure = measure_optical_focus
+    else:
+        logging.debug("Using SEM method to estimate focus")
+        Measure = measure_sem_focus
+    return Measure
+
+
 def get_next_image(det, timeout=None):
     """
     Acquire one image from the given detector
@@ -236,10 +257,123 @@ def _discard_data(df, data):
     pass
 
 
+def get_focus_level_at_pos(detector, dfbkg, timeout, focus, measure_focus, side, pos=None):
+    if pos is not None:
+        focus.moveAbsSync({"z": pos})
+    image = acquire_no_background(detector, dfbkg, timeout)
+    focus_level = measure_focus(image)
+    focus_pos = focus.position.value['z']
+    return focus_level, focus_pos
+
+
+def update_focus(detector, dfbkg, timeout, focus, measure_focus, step_size, focus_levels, rough_search, last_pos,
+                 center, rng):
+    # For negative steps size we're left of the center, positive to the right and at 0 we're at the center.
+    side = {-1: "left", 0: "center", 1: "right"}[numpy.sign(step_size)]
+
+    if side == "center":  # center position
+        # Don't redo the acquisition either if we've just done it, or if it
+        # was already done and we are still doing a rough search
+        if (rough_search or last_pos == center) and center in focus_levels:
+            focus_level = focus_levels[center]
+            pos = center
+        else:
+            focus_level, pos = get_focus_level_at_pos(detector, dfbkg, timeout, focus, measure_focus, side, None)
+            focus_levels[pos] = focus_level
+        last_pos = center
+    else:
+        pos = center + step_size
+        pos = max(rng[0], min(pos, rng[1]))  # clip
+
+        if rough_search and pos in focus_levels:
+            focus_level = focus_levels[pos]
+        else:
+            focus_level, pos = get_focus_level_at_pos(detector, dfbkg, timeout, focus, measure_focus, side, pos)
+            last_pos = pos
+            focus_levels[pos] = focus_level
+
+    logging.debug("Focus level (%s) at %f is %f", side, pos, focus_level)
+    return focus_levels, last_pos, focus_level, pos
+
+
+def update_stepsize_and_rough_search(best_pos, center, focus_rng, step_size, rough_search):
+    if best_pos == center:  # TODO verify if this is not going to give floating point errors
+        # If the best focus was found at the center reduce the step factor by a factor 2.
+        step_size /= 2
+        if rough_search:
+            logging.debug("Now zooming in on improved focus")
+        rough_search = False
+    elif (focus_rng[0] > best_pos - step_size or
+          focus_rng[1] < best_pos + step_size):
+        # If the distance between the best position and the min or max position is smaller
+        # than the step size, reduce the step factor by a factor 1.5.
+        step_size /= 1.5
+        logging.debug("Reducing step size to %g because the focus (%g) is near range limit %s",
+                      step_size, best_pos, focus_rng)
+        if step_size <= 8:
+            rough_search = False  # Force re-checking data
+    return step_size, rough_search
+
+
+def get_best_focus(current_levels, current_positions):
+    # Determine which of the three positions corresponds to the best focus level.
+    if all(almost_equal(current_levels[0], fl, rtol=1e-6) for fl in current_levels[1:]):
+        logging.debug("All focus levels identical, picking the center one.")
+        # The images are probably all noise, or not affected by the focus.
+        # In any case, the best is to not move the focus,
+        # so let's "center" on it. That's better than the default behaviour
+        # which would tend to pick "left" because that's the first one.
+        i_max = 1
+        best_focus_level = current_levels[i_max]
+    else:
+        best_focus_level = max(current_levels)
+        i_max = current_levels.index(best_focus_level)
+
+    best_pos = current_positions[i_max]
+
+    return best_pos, best_focus_level
+
+
+def _get_depth_of_field(detector, emt):
+    # use the .depthOfField on detector or emitter as maximum stepsize
+    avail_depths = (detector, emt)
+    if model.hasVA(emt, "dwellTime"):
+        # Hack in case of using the e-beam with a DigitalCamera detector.
+        # All the digital cameras have a depthOfField, which is updated based
+        # on the optical lens properties... but the depthOfField in this
+        # case depends on the e-beam lens.
+        # TODO: or better rely on which component the focuser affects? If it
+        #  affects (also) the emitter, use this one first? (but in the
+        #  current models the focusers affects nothing)
+        avail_depths = (emt, detector)
+    for c in avail_depths:
+        if model.hasVA(c, "depthOfField"):
+            dof = c.depthOfField.value
+            break
+    else:
+        logging.debug("No depth of field info found")
+        dof = 1e-6  # m, not too bad value
+    logging.debug("Depth of field is %f", dof)
+
+    return dof
+
+
 def _do_binary_focus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
     """
     Iteratively acquires an optical image, measures its focus level and adjusts
     the optical focus with respect to the focus level.
+
+    The function does a dichotomy search on the focus level. In practice, it
+    means it will start going into the direction that increase the focus with
+    big steps until the focus decreases again. Then it'll bounce back and forth
+    with smaller and smaller steps.
+    The tricky parts are:
+    * it's hard to estimate the focus level (on an arbitrary image)
+    * two acquisitions at the same focus position can have (slightly) different
+      focus levels (due to noise and sample degradation)
+    * if the focus actuator is not precise (eg, open loop), it's hard to
+      even go back to the same focus position when wanted
+
     future (model.ProgressiveFuture): Progressive future provided by the wrapper
     detector: model.DigitalCamera or model.Detector
     emt (None or model.Emitter): In case of a SED this is the scanner used
@@ -257,109 +391,72 @@ def _do_binary_focus(future, detector, emt, focus, dfbkg, good_focus, rng_focus)
             IOError if procedure failed
     """
     # TODO: dfbkg is mis-named, as it's the dataflow to use to _activate_ the
-    # emitter. It's necessary to acquire the background, as otherwise we assume
-    # the emitter is always active, but during background acquisition, that
-    # emitter is explicitly _disabled_.
-    # => change emt to "scanner", and "dfbkg" to "emitter". Or pass a stream?
-    # Note: the emt is almost not used, only to estimate completion time,
-    # and read the depthOfField.
+    #  emitter. It's necessary to acquire the background, as otherwise we assume
+    #  the emitter is always active, but during background acquisition, that
+    #  emitter is explicitly _disabled_.
+    #  => change emt to "scanner", and "dfbkg" to "emitter". Or pass a stream?
+    #  Note: the emt is almost not used, only to estimate completion time,
+    #  and read the depthOfField.
 
-    # It does a dichotomy search on the focus level. In practice, it means it
-    # will start going into the direction that increase the focus with big steps
-    # until the focus decreases again. Then it'll bounce back and forth with
-    # smaller and smaller steps.
-    # The tricky parts are:
-    # * it's hard to estimate the focus level (on an arbitrary image)
-    # * two acquisitions at the same focus position can have (slightly) different
-    #   focus levels (due to noise and sample degradation)
-    # * if the focus actuator is not precise (eg, open loop), it's hard to
-    #   even go back to the same focus position when wanted
+    # TODO: to go a bit faster, we could use synchronised acquisition on
+    #  the detector (if it supports it)
+
+    # TODO: we could estimate the quality of the autofocus by looking at the
+    #  standard deviation of the the focus levels (and the standard deviation
+    #  of the focus levels measured for the same focus position)
+
+    # TODO: update the estimated time (based on how long it takes to
+    #  move + acquire, and how many steps are approximately left)
+
     logging.debug("Starting binary autofocus on detector %s...", detector.name)
 
     try:
         # Big timeout, most important being that it's shorter than eternity
         timeout = 3 + 2 * estimate_acquisition_time(detector, emt)
 
-        # use the .depthOfField on detector or emitter as maximum stepsize
-        avail_depths = (detector, emt)
-        if model.hasVA(emt, "dwellTime"):
-            # Hack in case of using the e-beam with a DigitalCamera detector.
-            # All the digital cameras have a depthOfField, which is updated based
-            # on the optical lens properties... but the depthOfField in this
-            # case depends on the e-beam lens.
-            # TODO: or better rely on which component the focuser affects? If it
-            # affects (also) the emitter, use this one first? (but in the
-            # current models the focusers affects nothing)
-            avail_depths = (emt, detector)
-        for c in avail_depths:
-            if model.hasVA(c, "depthOfField"):
-                dof = c.depthOfField.value
-                break
-        else:
-            logging.debug("No depth of field info found")
-            dof = 1e-6  # m, not too bad value
-        logging.debug("Depth of field is %f", dof)
+        dof = _get_depth_of_field(detector, emt)
         min_step = dof / 2
 
         # adjust to rng_focus if provided
-        rng = focus.axes["z"].range
+        focus_rng = focus.axes["z"].range
         if rng_focus:
-            rng = (max(rng[0], rng_focus[0]), min(rng[1], rng_focus[1]))
+            focus_rng = (max(focus_rng[0], rng_focus[0]), min(focus_rng[1], rng_focus[1]))
 
-        max_step = (rng[1] - rng[0]) / 2
+        max_step = (focus_rng[1] - focus_rng[0]) / 2
         if max_step <= 0:
-            raise ValueError("Unexpected focus range %s" % (rng,))
+            raise ValueError("Unexpected focus range %s" % (focus_rng,))
 
-        rough_search = True  # False once we've passed the maximum level (ie, start bouncing)
-        # It's used to cache the focus level, to avoid reacquiring at the same
-        # position. We do it only for the 'rough' max search because for the fine
+        # get the function to use for measuring the focus
+        measure_focus = get_focus_measure(detector)
+
+        # focus_levels is used to cache the measured focus levels at each position, to avoid reacquiring at the same
+        # position. We do it only for the 'rough' max search, because for the fine
         # search, the actuator and acquisition delta are likely to play a role
         focus_levels = {}  # focus pos (float) -> focus level (float)
-
-        best_pos = focus.position.value['z']
-        best_fm = 0
+        # At the beginning when the step size is large, only do a rough search and do not measure the same location
+        # twice. At smaller step sizes re-evaluate positions that have been measured before.
+        rough_search = True
         last_pos = None
-
-        # Pick measurement method based on the heuristics that SEM detectors
-        # are typically just a point (ie, shape == data depth).
-        # TODO: is this working as expected? Alternatively, we could check
-        # MD_DET_TYPE.
-        if len(detector.shape) > 1:
-            if detector.role == 'diagnostic-ccd':
-                logging.debug("Using Spot method to estimate focus")
-                Measure = measure_spots_focus
-            elif detector.resolution.value[1] == 1:
-                logging.debug("Using 1d method to estimate focus")
-                Measure = measure_1d
-            else:
-                logging.debug("Using Optical method to estimate focus")
-                Measure = measure_optical_focus
-        else:
-            logging.debug("Using SEM method to estimate focus")
-            Measure = measure_sem_focus
-
         step_factor = 2 ** 7
+
+        # If a good focus position is provided compare the focus level at the good position with the level at the
+        # current position.
         if good_focus is not None:
-            current_pos = focus.position.value['z']
-            image = acquire_no_background(detector, dfbkg, timeout)
-            fm_current = Measure(image)
-            logging.debug("Focus level at %f is %f", current_pos, fm_current)
-            focus_levels[current_pos] = fm_current
+            focus_level_current, current_pos = get_focus_level_at_pos(detector, dfbkg, timeout, focus, measure_focus,
+                                                                      "current pos", pos=None)
+            focus_levels[current_pos] = focus_level_current
 
-            focus.moveAbsSync({"z": good_focus})
-            good_focus = focus.position.value["z"]
-            image = acquire_no_background(detector, dfbkg, timeout)
-            fm_good = Measure(image)
-            logging.debug("Focus level at %f is %f", good_focus, fm_good)
-            focus_levels[good_focus] = fm_good
-            last_pos = good_focus
+            focus_level_good, focus_pos = get_focus_level_at_pos(detector, dfbkg, timeout, focus, measure_focus,
+                                                                 "good focus", good_focus)
+            focus_levels[focus_pos] = focus_level_good
+            last_pos = focus_pos
 
-            if fm_good < fm_current:
-                # Move back to current position if good_pos is not that good
-                # after all
+            if focus_level_good < focus_level_current:
+                # Move back to current position if good_pos is worse than the current position
                 focus.moveAbsSync({"z": current_pos})
-                # it also means we are pretty close
-            step_factor = 2 ** 4
+            else:
+                # If there is a good focus we are pretty close to the correct focus, and can take smaller steps.
+                step_factor = 2 ** 4
 
         if step_factor * min_step > max_step:
             # Large steps would be too big. We can reduce step_factor and/or
@@ -367,113 +464,58 @@ def _do_binary_focus(future, detector, emt, focus, dfbkg, good_focus, rng_focus)
             min_step = max_step / step_factor
             logging.debug("Reducing min step to %g", min_step)
 
-        # TODO: to go a bit faster, we could use synchronised acquisition on
-        # the detector (if it supports it)
-        # TODO: we could estimate the quality of the autofocus by looking at the
-        # standard deviation of the the focus levels (and the standard deviation
-        # of the focus levels measured for the same focus position)
         logging.debug("Step factor used for autofocus: %g", step_factor)
         step_cntr = 1
-        while step_factor >= 1 and step_cntr <= MAX_STEPS_NUMBER:
-            # TODO: update the estimated time (based on how long it takes to
-            # move + acquire, and how many steps are approximately left)
-
-            # Start at the current focus position
+        step_size = step_factor * min_step
+        while step_size >= min_step and step_cntr <= MAX_STEPS_NUMBER:
+            # Start with the current position as center position
             center = focus.position.value['z']
-            # Don't redo the acquisition either if we've just done it, or if it
-            # was already done and we are still doing a rough search
-            if (rough_search or last_pos == center) and center in focus_levels:
-                fm_center = focus_levels[center]
-            else:
-                image = acquire_no_background(detector, dfbkg, timeout)
-                fm_center = Measure(image)
-                logging.debug("Focus level (center) at %f is %f", center, fm_center)
-                focus_levels[center] = fm_center
+            focus_levels, last_pos, level_center, center = update_focus(detector, dfbkg, timeout, focus, measure_focus,
+                                                                        0, focus_levels, rough_search, last_pos, center,
+                                                                        focus_rng)
+            # Check the focus level at the position right of the center position
+            focus_levels, last_pos, level_right, right = update_focus(detector, dfbkg, timeout, focus, measure_focus,
+                                                                      step_size, focus_levels, rough_search, last_pos,
+                                                                      center, focus_rng)
+            # Check the focus level at the position left of the center position
+            focus_levels, last_pos, level_left, left = update_focus(detector, dfbkg, timeout, focus, measure_focus,
+                                                                    -step_size, focus_levels, rough_search, last_pos,
+                                                                    center, focus_rng)
 
-            last_pos = center
-
-            # Move to right position
-            right = center + step_factor * min_step
-            right = max(rng[0], min(right, rng[1]))  # clip
-            if rough_search and right in focus_levels:
-                fm_right = focus_levels[right]
-            else:
-                focus.moveAbsSync({"z": right})
-                right = focus.position.value["z"]
-                last_pos = right
-                image = acquire_no_background(detector, dfbkg, timeout)
-                fm_right = Measure(image)
-                logging.debug("Focus level (right) at %f is %f", right, fm_right)
-                focus_levels[right] = fm_right
-
-            # Move to left position
-            left = center - step_factor * min_step
-            left = max(rng[0], min(left, rng[1]))  # clip
-            if rough_search and left in focus_levels:
-                fm_left = focus_levels[left]
-            else:
-                focus.moveAbsSync({"z": left})
-                left = focus.position.value["z"]
-                last_pos = left
-                image = acquire_no_background(detector, dfbkg, timeout)
-                fm_left = Measure(image)
-                logging.debug("Focus level (left) at %f is %f", left, fm_left)
-                focus_levels[left] = fm_left
-
-            fm_range = (fm_left, fm_center, fm_right)
-            if all(almost_equal(fm_left, fm, rtol=1e-6) for fm in fm_range[1:]):
-                logging.debug("All focus levels identical, picking the middle one")
-                # Most probably the images are all noise, or they are not affected
-                # by the focus. In any case, the best is to not move the focus,
-                # so let's "center" on it. That's better than the default behaviour
-                # which would tend to pick "left" because that's the first one.
-                i_max = 1
-                best_pos, best_fm = center, fm_center
-            else:
-                pos_range = (left, center, right)
-                best_fm = max(fm_range)
-                i_max = fm_range.index(best_fm)
-                best_pos = pos_range[i_max]
+            # Evaluate at which of the three positions the highest focus level was found.
+            best_pos, best_focus_level = get_best_focus((level_left, level_center, level_right),
+                                                        (left, center, right))
 
             if future._autofocus_state == CANCELLED:
                 raise CancelledError()
 
             if left == right:
-                logging.info("Seems to have reached minimum step size (at %g m)", 2 * step_factor * min_step)
+                logging.info("Seems to have reached minimum step size (at %g m)", 2 * step_size)
                 break
-
-            # if best focus was found at the center
-            if i_max == 1:
-                step_factor /= 2
-                if rough_search:
-                    logging.debug("Now zooming in on improved focus")
-                rough_search = False
-            elif (rng[0] > best_pos - step_factor * min_step or
-                  rng[1] < best_pos + step_factor * min_step):
-                step_factor /= 1.5
-                logging.debug("Reducing step factor to %g because the focus (%g) is near range limit %s",
-                              step_factor, best_pos, rng)
-                if step_factor <= 8:
-                    rough_search = False  # Force re-checking data
 
             if last_pos != best_pos:
                 # Clip best_pos in case the hardware reports a position outside of the range.
-                best_pos = max(rng[0], min(best_pos, rng[1]))
+                best_pos = max(focus_rng[0], min(best_pos, focus_rng[1]))
+                # Move to the best position, so that becomes the new center position.
                 focus.moveAbsSync({"z": best_pos})
+
+            step_size, rough_search = update_stepsize_and_rough_search(best_pos, center, focus_rng,
+                                                                       step_size, rough_search)
             step_cntr += 1
 
-        worst_fm = min(focus_levels.values())
+        # Check that the found best focus level is realistic.
+        worst_focus_level = min(focus_levels.values())
         if step_cntr == MAX_STEPS_NUMBER:
             logging.info("Auto focus gave up after %d steps @ %g m", step_cntr, best_pos)
-        elif (best_fm - worst_fm) < best_fm * 0.5:
+        elif (best_focus_level - worst_focus_level) < best_focus_level * 0.5:
             # We can be confident of the data if there is a "big" (50%) difference
             # between the focus levels.
             logging.info("Auto focus indecisive but picking level %g @ %g m (lowest = %g)",
-                         best_fm, best_pos, worst_fm)
+                         best_focus_level, best_pos, worst_focus_level)
         else:
-            logging.info("Auto focus found best level %g @ %g m", best_fm, best_pos)
+            logging.info("Auto focus found best level %g @ %g m", best_focus_level, best_pos)
 
-        return best_pos, best_fm
+        return best_pos, best_focus_level
 
     except CancelledError:
         # Go to the best position known so far
@@ -513,41 +555,9 @@ def _do_exhaustive_focus(future, detector, emt, focus, dfbkg, good_focus, rng_fo
         # Big timeout, most important being that it's shorter than eternity
         timeout = 3 + 2 * estimate_acquisition_time(detector, emt)
 
-        # use the .depthOfField on detector or emitter as maximum stepsize
-        avail_depths = (detector, emt)
-        if model.hasVA(emt, "dwellTime"):
-            # Hack in case of using the e-beam with a DigitalCamera detector.
-            # All the digital cameras have a depthOfField, which is updated based
-            # on the optical lens properties... but the depthOfField in this
-            # case depends on the e-beam lens.
-            avail_depths = (emt, detector)
-        for c in avail_depths:
-            if model.hasVA(c, "depthOfField"):
-                dof = c.depthOfField.value
-                break
-        else:
-            logging.debug("No depth of field info found")
-            dof = 1e-6  # m, not too bad value
-        logging.debug("Depth of field is %f", dof)
+        dof = _get_depth_of_field(detector, emt)
 
-        # Pick measurement method based on the heuristics that SEM detectors
-        # are typically just a point (ie, shape == data depth).
-        # TODO: is this working as expected? Alternatively, we could check
-        # MD_DET_TYPE.
-        if len(detector.shape) > 1:
-            if detector.role == 'diagnostic-ccd':
-                logging.debug("Using Spot method to estimate focus")
-                Measure = measure_spots_focus
-            elif detector.resolution.value[1] == 1:
-                logging.debug("Using 1d method to estimate focus")
-                Measure = measure_1d
-            else:
-                logging.debug("Using Optical method to estimate focus")
-                Measure = measure_optical_focus
-        else:
-            logging.debug("Using SEM method to estimate focus")
-            Measure = measure_sem_focus
-
+        Measure = get_focus_measure(detector)
         # adjust to rng_focus if provided
         rng = focus.axes["z"].range
         if rng_focus:
