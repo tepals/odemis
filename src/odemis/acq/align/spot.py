@@ -585,3 +585,36 @@ def estimateCenterTime(et, dist=None):
         steps = math.log(dist / err_mrg) / math.log(2)
         steps = min(steps, FINE_MOVE)
     return steps * (et + 2)  # s
+
+
+def get_spot_grid_shift(image, good_grid_position, pixel_size=1, magnification=1):
+    """
+    Get the shift between a known good grid position and the spots on the image.
+
+    :param image: ndarray,
+        Data array containing the greyscale image with spots.
+    :param good_grid_position: tuple
+        The (x, y) position in pixel coordinates where the center of the grid is expected to be.
+    :param pixel_size: tuple
+        Size of the pixels in the image in [m/px]
+    :param magnification: int, float
+        Magnification of the image.
+
+    :return shift_m: tuple
+        The shift between the good position and the position of the grid in the image.
+
+    """
+    # Find the location of the spots on the diagnostic camera.
+    _, translation, *_ = FindGridSpots(image, (8, 8))
+
+    # Determine the shift of the spots, by subtracting the good multiprobe position from the average (center)
+    # spot position.
+    shift = translation - good_grid_position  # [px]
+
+    # Convert the shift from pixels to meters
+    shift_m = shift * pixel_size / magnification  # [px] * [m/px] / [-] = [m]
+
+    # Transform the spots from the left-handed image coordinate system to a right-handed coordinate system.
+    shift_m = (shift_m[0], -shift_m[1])
+
+    return shift_m

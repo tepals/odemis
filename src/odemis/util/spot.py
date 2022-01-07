@@ -553,3 +553,20 @@ def bandpass_filter(image, len_noise, len_object):
         return cv2.subtract(denoised, background)
     else:
         return numpy.maximum(denoised - background, 0)
+
+
+def get_spot_grid_shift(image, good_grid_position, pixel_size=1, magnification=1):
+    # Find the location of the spots on the diagnostic camera.
+    spot_coordinates, *_ = FindGridSpots(image, (8, 8))
+
+    # Transform the spots from the diagnostic camera coordinate system to a right-handed coordinate
+    # system with the origin in the bottom left.
+    spot_coordinates[:, 1] = image.shape[1] - spot_coordinates[:, 1]  # [px]
+
+    # Determine the shift of the spots, by subtracting the good multiprobe position from the average (center)
+    # spot position.
+    shift = numpy.mean(spot_coordinates, axis=0) - good_grid_position  # [px]
+
+    # Convert the shift from pixels to meters
+    shift_m = shift * pixel_size / magnification  # [m] pixel size diagnostic camera divided by 40x magnification
+    return shift_m

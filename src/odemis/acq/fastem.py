@@ -32,7 +32,7 @@ import numpy
 
 from odemis import model, util
 from odemis.acq import stitching
-from odemis.acq.align.spot import FindGridSpots
+from odemis.acq.align.spot import FindGridSpots, get_spot_grid_shift
 from odemis.acq.stitching import REGISTER_IDENTITY
 from odemis.acq.stream import SEMStream
 from odemis.util import TimeoutError
@@ -444,25 +444,18 @@ class AcquisitionTask(object):
         centered on the mppc detector.
         """
         # asap=False: wait until new image is acquired (don't read from buffer)
-        ccd_image = self._ccd.data.get(asap=False)
+        image = self._ccd.data.get(asap=False)
 
-        # Find the location of the spots on the diagnostic camera.
-        spot_coordinates, *_ = FindGridSpots(ccd_image, (8, 8))
+        good_grid_position = (self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["x"],
+                              self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["y"])
 
-        # Transform the spots from the diagnostic camera coordinate system to a right-handed coordinate
-        # system with the origin in the bottom left.
-        spot_coordinates[:, 1] = ccd_image.shape[1] - spot_coordinates[:, 1]  # [px]
+        # FIXME the good grid position should be defined in the diagnostic camera coordinate system
+        # Transform the good grid position to the diagnostic camera coordinate system
+        good_grid_position = (good_grid_position[0], image.shape[1] - good_grid_position[1])
 
-        # Determine the shift of the spots, by subtracting the good multiprobe position from the average (center)
-        # spot position.
-        good_mp_position = (self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["x"],
-                            self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["y"])
-        shift = numpy.mean(spot_coordinates, axis=0) - good_mp_position  # [px]
+        shift_m = get_spot_grid_shift(image, good_grid_position,
+                                      self._ccd.pixelSize.value, self._lens.magnification.value)
 
-        # Convert the shift from pixels to meters
-        pixel_size = self._ccd.pixelSize.value
-        magnification = self._lens.magnification.value
-        shift_m = shift * pixel_size / magnification  # [m] pixel size diagnostic camera divided by 40x magnification
         logging.debug("Beam shift adjustment required due to stage magnetic field: {} [m]".format(shift_m))
 
         cur_beam_shift_pos = numpy.array(self._beamshift.shift.value)
@@ -470,6 +463,23 @@ class AcquisitionTask(object):
         self._beamshift.shift.value = (cur_beam_shift_pos + shift_m)
 
         logging.debug("New beam shift m: {}".format(self._beamshift.shift.value))
+
+
+# def get_spot_grid_shift(image, good_grid_position, pixel_size=1, magnification=1):
+#     # Find the location of the spots on the diagnostic camera.
+#     spot_coordinates, *_ = FindGridSpots(image, (8, 8))
+#
+#     # Transform the spots from the diagnostic camera coordinate system to a right-handed coordinate
+#     # system with the origin in the bottom left.
+#     spot_coordinates[:, 1] = image.shape[1] - spot_coordinates[:, 1]  # [px]
+#
+#     # Determine the shift of the spots, by subtracting the good multiprobe position from the average (center)
+#     # spot position.
+#     shift = numpy.mean(spot_coordinates, axis=0) - good_grid_position  # [px]
+#
+#     # Convert the shift from pixels to meters
+#     shift_m = shift * pixel_size / magnification  # [m] pixel size diagnostic camera divided by 40x magnification
+#     return shift_m
 
 
 ########################################################################################################################
