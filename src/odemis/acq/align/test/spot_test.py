@@ -314,6 +314,19 @@ class TestFindGridSpots(unittest.TestCase):
         numpy.testing.assert_array_almost_equal(scaling, grid_spots['scaling'], decimal=3)
         self.assertAlmostEqual(rotation, grid_spots['rotation'], places=4)
 
+    def test_get_spot_grid_shift(self):
+        image = numpy.zeros((256, 256))
+        # set a grid of 8 by 8 points to 1
+        image[54:150:12, 54:150:12] = 1
+
+        good_grid_position = (10, 10)
+
+        shift_m = spot.get_spot_grid_shift(image, good_grid_position)
+
+        self.assertEqual(shift_m[0], 86)
+        self.assertEqual(shift_m[1], 86)
+
+
 
 if __name__ == '__main__':
     unittest.main()

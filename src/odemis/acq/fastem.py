@@ -451,20 +451,12 @@ class AcquisitionTask(object):
         centered on the mppc detector.
         """
         # asap=False: wait until new image is acquired (don't read from buffer)
-        ccd_image = self._ccd.data.get(asap=False)
+        image = self._ccd.data.get(asap=False)
 
-        # Find the location of the spots on the diagnostic camera.
-        spot_coordinates, *_ = FindGridSpots(ccd_image, (8, 8))
+        good_grid_position = (self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["x"],
+                              self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["y"])
 
-        # Transform the spots from the diagnostic camera coordinate system to a right-handed coordinate
-        # system with the origin in the bottom left.
-        spot_coordinates[:, 1] = ccd_image.shape[1] - spot_coordinates[:, 1]  # [px]
-
-        # Determine the shift of the spots, by subtracting the good multiprobe position from the average (center)
-        # spot position.
-        good_mp_position = (self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["x"],
-                            self._ccd.getMetadata()[model.MD_FAV_POS_ACTIVE]["y"])
-        shift = numpy.mean(spot_coordinates, axis=0) - good_mp_position  # [px]
+        shift = get_spot_grid_shift(image, good_grid_position)
 
         # Convert the shift from pixels to meters
         pixel_size = self._ccd.pixelSize.value
@@ -477,6 +469,20 @@ class AcquisitionTask(object):
         self._beamshift.shift.value = (cur_beam_shift_pos + shift_m)
 
         logging.debug("New beam shift m: {}".format(self._beamshift.shift.value))
+
+
+def get_spot_grid_shift(image, good_grid_position):
+    # Find the location of the spots on the diagnostic camera.
+    spot_coordinates, *_ = FindGridSpots(image, (8, 8))
+
+    # Transform the spots from the diagnostic camera coordinate system to a right-handed coordinate
+    # system with the origin in the bottom left.
+    spot_coordinates[:, 1] = image.shape[1] - spot_coordinates[:, 1]  # [px]
+
+    # Determine the shift of the spots, by subtracting the good multiprobe position from the average (center)
+    # spot position.
+    shift = numpy.mean(spot_coordinates, axis=0) - good_grid_position  # [px]
+    return shift
 
 
 ########################################################################################################################
