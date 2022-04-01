@@ -29,11 +29,13 @@ import time
 import unittest
 
 import numpy
-from odemis import model
+from Pyro5.api import Daemon
 
+from odemis import model
 from odemis.driver import xt_client
-from odemis.model import ProgressiveFuture, NotSettableError
+from odemis.model import ProgressiveFuture, NotSettableError, CancellableFuture
 from odemis.util import test
+from xtadapter import server_sim_xttoolkit
 
 logging.basicConfig(level=logging.INFO)
 
@@ -42,6 +44,8 @@ logging.basicConfig(level=logging.INFO)
 # * TEST_NOHW = sim: xtadapter/server_sim.py running on localhost
 # * TEST_NOHW = 0 (or anything else): connected to the real hardware
 TEST_NOHW = os.environ.get("TEST_NOHW", "0")  # Default to Hw testing
+TEST_NOHW = "sim"
+
 if TEST_NOHW == "sim":
     pass
 elif TEST_NOHW == "0":
@@ -100,6 +104,9 @@ if TEST_NOHW == "sim":
     CONFIG_MB_SEM["address"] = "PYRO:Microscope@localhost:4242"
 
 
+_executor = model.CancellableThreadPoolExecutor(max_workers=1)
+
+
 class TestMicroscope(unittest.TestCase):
     """
     Test communication with the server using the Microscope client class.
@@ -107,6 +114,9 @@ class TestMicroscope(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if TEST_NOHW == "sim":
+            cls.daemon = server_sim_xttoolkit.start_server()
+
         if TEST_NOHW is True:
             raise unittest.SkipTest("No simulator available.")
 
@@ -126,6 +136,8 @@ class TestMicroscope(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        if TEST_NOHW == "sim":
+            server_sim_xttoolkit.stop_server(cls.daemon)
         cls.detector.terminate()
 
     def setUp(self):
@@ -432,7 +444,7 @@ class TestMicroscope(unittest.TestCase):
         """
         Test for the auto contrast brightness functionality.
         """
-        self.scanner.blanker = False
+        self.scanner.blanker.value = False
         # Start auto contrast brightness and check if it is running.
         auto_contrast_brightness_future = self.scanner.applyAutoContrastBrightness(self.detector.role)
         auto_contrast_brightness_state = self.microscope.is_running_auto_contrast_brightness(self.scanner.channel)
@@ -470,13 +482,13 @@ class TestMicroscope(unittest.TestCase):
 
         auto_contrast_brightness_state = self.microscope.is_running_auto_contrast_brightness(self.scanner.channel)
         self.assertEqual(auto_contrast_brightness_state, False)
-        self.scanner.blanker = True
+        self.scanner.blanker.value = True
 
     def test_apply_autofocus(self):
         """
         Test for the auto functionality of the autofocus.
         """
-        self.scanner.blanker = False
+        self.scanner.blanker.value = False
         # Start auto focus and check if it is running.
         autofocus_future = self.efocus.applyAutofocus(self.detector.role)
         autofocus_state = self.microscope.is_autofocusing(self.scanner.channel)
@@ -512,7 +524,7 @@ class TestMicroscope(unittest.TestCase):
 
         autofocus_state = self.microscope.is_autofocusing(self.scanner.channel)
         self.assertEqual(autofocus_state, False)
-        self.scanner.blanker = True
+        self.scanner.blanker.value = True
 
     def test_set_beam_shift(self):
         """Setting the beam shift."""
@@ -539,6 +551,9 @@ class TestMicroscopeInternal(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if TEST_NOHW == "sim":
+            cls.daemon = server_sim_xttoolkit.start_server()
+
         if TEST_NOHW is True:
             raise unittest.SkipTest("No simulator available.")
 
@@ -547,6 +562,9 @@ class TestMicroscopeInternal(unittest.TestCase):
         for child in cls.microscope.children.value:
             if child.name == CONFIG_SCANNER["name"]:
                 cls.scanner = child
+
+    def tearDownClass(cls):
+        cls.f.cancel()
 
     def setUp(self):
         if self.microscope.get_vacuum_state() != 'vacuum':
