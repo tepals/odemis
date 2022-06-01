@@ -93,4 +93,7 @@ class TestCatmaid(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    import logging
+    logging.getLogger().setLevel(logging.DEBUG)
+    logging.basicConfig(format="%(asctime)s  %(levelname)-7s %(module)s:%(lineno)d %(message)s")
     unittest.main()

@@ -200,7 +200,9 @@ class DataArrayShadowPyramidalCatmaid(DataArrayShadow):
             tile_height=tile_height,
         )
         try:
+            # logging.debug(f"Requesting tile from {tile_url}")
             image = response_to_array(self._session.get(tile_url, auth=self._auth))
+            # logging.debug(f"Successfully requested tile from {tile_url}")
         except HTTPError as e:
             if e.response.status_code == 401:
                 raise AuthenticationError("Authentication failed while getting tiles at {}".format(tile_url))
