@@ -21,35 +21,39 @@ Odemis. If not, see http://www.gnu.org/licenses/.
 '''
 from __future__ import division
 
-from concurrent.futures._base import CancelledError
 import logging
-from unittest import mock
-
-import numpy
-from odemis import model
-import odemis
-from odemis.acq import acqmng
-from odemis.driver import xt_client
-from odemis.driver.test.xt_client_test import CONFIG_FIB_SEM, CONFIG_FIB_SCANNER, CONFIG_DETECTOR
-from odemis.util import test
 import os
 import time
 import unittest
-from unittest.case import skip
+from concurrent.futures._base import CancelledError
+from unittest import mock
 
-from odemis.acq.leech import ProbeCurrentAcquirer
+import numpy
+
+import odemis
 import odemis.acq.path as path
 import odemis.acq.stream as stream
+from odemis import model
+from odemis.acq import acqmng
 from odemis.acq.acqmng import SettingsObserver, acquireZStack
-from odemis.driver.tmcm import TMCLController
+from odemis.acq.leech import ProbeCurrentAcquirer
+from odemis.driver import xt_client
+from odemis.driver.test.xt_client_test import CONFIG_FIB_SEM, CONFIG_FIB_SCANNER, CONFIG_DETECTOR
+from odemis.util import test
 from odemis.util.comp import generate_zlevels
+from xtadapter import server_sim
 
-logging.getLogger().setLevel(logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG,
+                    format="%(asctime)s  %(levelname)-7s %(module)s:%(lineno)d %(message)s",
+                    force=True)
+
+TEST_NOHW = (os.environ.get("TEST_NOHW", "0") != "0")  # Default is hardware testing
 
 CONFIG_PATH = os.path.dirname(odemis.__file__) + "/../../install/linux/usr/share/odemis/"
 SPARC_CONFIG = CONFIG_PATH + "sim/sparc-pmts-sim.odm.yaml"
 SECOM_CONFIG = CONFIG_PATH + "sim/secom-sim.odm.yaml"
 ENZEL_CONFIG = CONFIG_PATH + "sim/enzel-sim.odm.yaml"
+
 
 class Fake0DDetector(model.Detector):
     """
@@ -61,6 +65,7 @@ class Fake0DDetector(model.Detector):
         self.data = Fake0DDataFlow()
         self._shape = (float("inf"),)
 
+
 class Fake0DDataFlow(model.DataFlow):
     """
     Mock object just sufficient for the ProbeCurrentAcquirer
@@ -69,6 +74,7 @@ class Fake0DDataFlow(model.DataFlow):
         da = model.DataArray([1e-12], {model.MD_ACQ_DATE: time.time()})
         return da
 
+
 class TestNoBackend(unittest.TestCase):
     # No backend, and only fake streams that don't generate anything
 
@@ -76,23 +82,18 @@ class TestNoBackend(unittest.TestCase):
     pass
 
 
-class FIBStreamacquisitionTest(unittest.TestCase):
+class FIBStreamAcquisitionTest(unittest.TestCase):
     """
     Tests the FIBStream using the XT client.
     """
 
     @classmethod
     def setUpClass(cls):
-        # Accept three values for TEST_NOHW
-        # * TEST_NOHW = 1: not connected to anything => skip most of the tests
-        # * TEST_NOHW = sim: xtadapter/server_sim.py running on localhost
-        # * TEST_NOHW = 0 (or anything else): connected to the real hardware
-        TEST_NOHW = os.environ.get("TEST_NOHW", "0")  # Default to Hw testing
-        if TEST_NOHW is True:
-            raise unittest.SkipTest("No hardware available.")
-
-        if TEST_NOHW == "sim":
-            CONFIG_FIB_SEM["address"] = "PYRO:Microscope@localhost:4242"
+        if TEST_NOHW is False:
+            address = "PYRO:Microscope@localhost:4242"
+            cls.ms = server_sim.MicServer(address)
+            cls.ms.start_server()
+            CONFIG_FIB_SEM["address"] = address
 
         cls.microscope = xt_client.SEM(**CONFIG_FIB_SEM)
 
@@ -102,6 +103,12 @@ class FIBStreamacquisitionTest(unittest.TestCase):
             elif child.name == CONFIG_DETECTOR["name"]:
                 cls.detector = child
         cls.FIB_stream = stream.FIBStream("test FIB", cls.detector, cls.detector.data, cls.fib_scanner)
+    
+    @classmethod
+    def tearDownClass(cls):
+        cls.detector.terminate()
+        if TEST_NOHW:
+            cls.ms.stop_server()
 
     def setUp(self):
         # Mock the get_latest_image method of the microscope so that the number of calls to the method can be counted.

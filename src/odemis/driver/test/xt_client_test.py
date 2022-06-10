@@ -34,24 +34,14 @@ from odemis import model
 from odemis.driver import xt_client
 from odemis.model import ProgressiveFuture, NotSettableError
 from odemis.util import test
+from xtadapter import server_sim
 
 logging.basicConfig(level=logging.DEBUG,
                     format="%(asctime)s  %(levelname)-7s %(module)s:%(lineno)d %(message)s",
                     force=True)
 
-# Accept three values for TEST_NOHW
-# * TEST_NOHW = 1: not connected to anything => skip most of the tests
-# * TEST_NOHW = sim: xtadapter/server_sim.py running on localhost
-# * TEST_NOHW = 0 (or anything else): connected to the real hardware
-TEST_NOHW = os.environ.get("TEST_NOHW", "0")  # Default to Hw testing
-if TEST_NOHW == "sim":
-    pass
-elif TEST_NOHW == "0":
-    TEST_NOHW = False
-elif TEST_NOHW == "1":
-    TEST_NOHW = True
-else:
-    raise ValueError("Unknown value of environment variable TEST_NOHW=%s" % TEST_NOHW)
+TEST_NOHW = (os.environ.get("TEST_NOHW", "0") != "0")  # Default is hardware testing
+
 
 # arguments used for the creation of basic components
 CONFIG_SCANNER = {"name": "scanner", "role": "ebeam", "hfw_nomag": 1, "channel": "electron1"}
@@ -110,7 +100,8 @@ class TestMicroscope(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if TEST_NOHW is True:
-            raise unittest.SkipTest("No simulator available.")
+            cls.ms = server_sim.MicServer("PYRO:Microscope@localhost:4242")
+            cls.ms.start_server()
 
         cls.microscope = xt_client.SEM(**CONFIG_SEM)
 
@@ -129,6 +120,8 @@ class TestMicroscope(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.detector.terminate()
+        if TEST_NOHW:
+            cls.ms.stop_server()
 
     def setUp(self):
         # if self.chamber.position.value["vacuum"] > 100e-3:
@@ -593,13 +586,19 @@ class TestMicroscopeInternal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if TEST_NOHW is True:
-            raise unittest.SkipTest("No simulator available.")
+            cls.ms = server_sim.MicServer("PYRO:Microscope@localhost:4242")
+            cls.ms.start_server()
 
         cls.microscope = xt_client.SEM(**CONFIG_SEM)
 
         for child in cls.microscope.children.value:
             if child.name == CONFIG_SCANNER["name"]:
                 cls.scanner = child
+
+    @classmethod
+    def tearDownClass(cls):
+        if TEST_NOHW:
+            cls.ms.stop_server()
 
     def setUp(self):
         if self.microscope.get_vacuum_state() != 'vacuum':
@@ -1086,6 +1085,10 @@ class TestFIBScanner(unittest.TestCase):
     def setUpClass(cls):
         if TEST_NOHW is True:
             raise unittest.SkipTest("No simulator available.")
+        elif TEST_NOHW == 'sim':
+            cls.ms = server_sim.MicServer("PYRO:Microscope@localhost:4242")
+            d = cls.ms.get_daemon()
+            cls.ms.start_server(d)
 
         cls.microscope = xt_client.SEM(**CONFIG_FIB_SEM)
 
@@ -1094,6 +1097,12 @@ class TestFIBScanner(unittest.TestCase):
                 cls.fib_scanner = child
             elif child.name == CONFIG_DETECTOR["name"]:
                 cls.detector = child
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.detector.terminate()
+        if TEST_NOHW:
+            cls.ms.stop_server()
 
     def setUp(self):
         if self.microscope.get_vacuum_state() != 'vacuum':
@@ -1117,6 +1126,10 @@ class TestDualModeMicroscope(unittest.TestCase):
     def setUpClass(cls):
         if TEST_NOHW is True:
             raise unittest.SkipTest("No simulator available.")
+        elif TEST_NOHW == 'sim':
+            cls.ms = server_sim.MicServer("PYRO:Microscope@localhost:4242")
+            d = cls.ms.get_daemon()
+            cls.ms.start_server(d)
 
         cls.microscope = xt_client.SEM(**CONFIG_DUAL_MODE_SEM)
 
@@ -1127,6 +1140,12 @@ class TestDualModeMicroscope(unittest.TestCase):
                 cls.fib_scanner = child
             elif child.name == CONFIG_DETECTOR["name"]:
                 cls.detector = child
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.detector.terminate()
+        if TEST_NOHW:
+            cls.ms.stop_server()
 
     def setUp(self):
         if self.microscope.get_vacuum_state() != 'vacuum':
@@ -1236,6 +1255,10 @@ class TestMBScanner(unittest.TestCase):
     def setUpClass(cls):
         if TEST_NOHW is True:
             raise unittest.SkipTest("No simulator available.")
+        elif TEST_NOHW == 'sim':
+            cls.ms = server_sim.MicServer("PYRO:Microscope@localhost:4242", xt_type="xttoolkit")
+            d = cls.ms.get_daemon()
+            cls.ms.start_server(d)
 
         cls.microscope = xt_client.SEM(**CONFIG_MB_SEM)
 
@@ -1244,6 +1267,11 @@ class TestMBScanner(unittest.TestCase):
                 cls.scanner = child
             elif child.name == CONFIG_FOCUS["name"]:
                 cls.efocus = child
+
+    @classmethod
+    def tearDownClass(cls):
+        if TEST_NOHW:
+            cls.ms.stop_server()
 
     def setUp(self):
         if self.microscope.get_vacuum_state() != 'vacuum':
