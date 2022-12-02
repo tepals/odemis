@@ -106,7 +106,7 @@ class AvantesDLL(CDLL):
         self.AVS_Activate.restype = c_long
         self.AVS_Deactivate.restype = c_bool
         self.AVS_Deactivate.errcheck = self.av_err_bool
-        self.AVS_Measure.argtypes = [c_long, MEASUREMENT_CB, c_short]
+        # self.AVS_Measure.argtypes = [c_long, MEASUREMENT_CB, c_short]
 
     def __getitem__(self, name):
         try:
@@ -885,9 +885,9 @@ class Spectrometer(model.Detector):
         # There is a limitation in ctypes, which prevents from using a method as
         # callback. So instead, we define a local function, which has access to
         # self and other needed context information.
-        @MEASUREMENT_CB
+        # @MEASUREMENT_CB
         def onData(p_dev_hdl, p_result):
-            # logging.debug("Got a data %s %s" % (p_dev_hdl.contents.value, p_result.contents.value))
+            logging.debug("Got a data %s %s" % (p_dev_hdl.contents.value, p_result.contents.value))
             if p_dev_hdl.contents.value != self._dev_hdl.value:
                 logging.warning("Received information not about the current device")
                 return
@@ -896,8 +896,9 @@ class Spectrometer(model.Detector):
             if result < SUCCESS:
                 logging.error("Measurement data failed to be acquired (error %d)", result)
                 return
-
+            logging.debug("put msg GEN_DATA")
             self._genmsg.put(GEN_DATA)
+            logging.debug("after put msg GEN_DATA")
 
         # TODO: handle device reconnection (on ERR_DEVICE_NOT_FOUND/ERR_COMMUNICATION)
 
@@ -913,6 +914,7 @@ class Spectrometer(model.Detector):
                 # Keep acquiring images until stop requested
                 while True:
                     need_reconfig = (exp != self.exposureTime.value)
+                    logging.info("exp: {}, va: {}".format(exp, self.exposureTime.value))
                     if need_reconfig:
                         # Pass the acquisition settings, and get ready for acquisition
                         # TODO: move to a separate command that prepares the settings
@@ -926,6 +928,7 @@ class Spectrometer(model.Detector):
 
                     # Wait for trigger (if synchronized)
                     if self._acq_wait_trigger():
+                        logging.info("acq_wait_trigger")
                         # True = Stop requested
                         break
 
@@ -1076,6 +1079,106 @@ def _val(obj):
         return obj
 
 
+# Start: tuple (number of measurements (int), period (float))
+SIM_CMD_STOP = "E"
+SIM_CMD_TERMINATE = "T"
+
+class RepeatingMeasurement:
+    """
+    An almost endless timer thread.
+    It stops when calling cancel() or the callback disappears.
+    """
+    def __init__(self, callback):
+        """
+        callback (callable): function to call
+        """
+        self._callback = callback
+        self._commands = queue.Queue()
+        self._runner = threading.Thread(target=self._acquisition)
+        self._runner.start()
+
+    def _acquisition(self):
+        # Reads a command on what to do:
+        # Measure (nb of meansurement, period)
+        # Stop measuring
+        # terminate
+
+        while True:
+            # Stopped => wait until starting
+            n_msr, period = self._wait_acq_start()
+
+            # Running for n_msr (but can be 0, to indicate infinite)
+            ndata_notified = 0
+            while True:
+                # TODO: change period to "time to wait", based on previous to be more precise
+                if self._wait_acq_stop(period):
+                    # Should stop
+                    logging.debug("Stopping early acquisition sim")
+                    break
+
+                self._callback()
+                ndata_notified += 1
+
+                if n_msr != 0 and n_msr >= ndata_notified:
+                    logging.debug("Stopping acqusition automatically after %s measurements", ndata_notified)
+                    break
+
+    def _get_next_command(self, **kwargs):
+        """
+        Read one message from the acquisition queue
+        timeout
+        return (str): message
+        raises queue.Empty: if no message on the queue
+        """
+        msg = self._commands.get(**kwargs)
+        if isinstance(msg, tuple) and len(msg) == 2:
+            logging.debug("Acq received start message")
+        elif msg == SIM_CMD_TERMINATE:
+            logging.debug("Acq received terminate message")
+            raise TerminationRequested()
+        elif msg in (SIM_CMD_STOP,):
+            logging.debug("Acq received message %s", msg)
+        else:
+            logging.warning("Acq received unexpected message %s", msg)
+        return msg
+
+    def _wait_acq_start(self):
+        """
+
+        :return: n_msr, period
+        """
+        while True:
+            msg = self._get_acq_msg()
+            if isinstance(msg, tuple):
+                return msg
+            # Other message => keep waiting
+
+    def _wait_acq_stop(self, timeout):
+        """
+        Return
+        :param timeout: maximum time to wait
+        :return: True if should stop, otherwise False
+        """
+        while True:
+            # TODO: update the time left, like in _acq_wait_data
+            try:
+                msg = self._get_acq_msg(timeout=timeout)
+                if msg == SIM_CMD_STOP:
+                    return True
+                # Continue
+            except queue.Empty:
+                return False
+
+    def start(self, n_msr, period):
+        self._commands.put((n_msr, period))
+
+    def stop(self):
+        self._commands.put(SIM_CMD_STOP)
+
+    def cancel(self):
+        self._commands.put(SIM_CMD_TERMINATE)
+
+
 class FakeAvantesDLL(object):
     """
     Fake AvantesDLL. It basically simulates a spectrograph connected.
@@ -1097,6 +1200,8 @@ class FakeAvantesDLL(object):
         self._meas_cb = None  # Function to call on new measurement data
 
         self._tick_start = time.time()  # Time the device booted
+
+        self._acquirer = RepeatingMeasurement(self._on_new_measurement)
 
     def AVS_Init(self, port):
         return
@@ -1146,41 +1251,63 @@ class FakeAvantesDLL(object):
         """
         Calls the callback for each measurement ready
         """
-        self._ndata_notified += 1
+        logging.info("on new measurement")
+
+        # self._ndata_notified += 1
         if self._meas_cb:
+            logging.debug("self._meas_cb")
             self._meas_cb(pointer(self._handle), pointer(c_int(0)))
 
-        # Stop the callback as soon as we've received enough data
-        if self._meas_nmsr > 0 and self._ndata_notified >= self._meas_nmsr:
-            if self._meas_timer:
-                self._meas_timer.cancel()
-                self._meas_timer = None
-            self._meas_cb = None
+        logging.debug("after self._meas_cb")
+        # # Stop the callback as soon as we've received enough data
+        # logging.debug("self._meas_nmsr: {}, self._ndata_notified {}".format(self._meas_nmsr, self._ndata_notified))
+        # time.sleep(0.5)
+        # if self._meas_nmsr > 0 and self._ndata_notified >= self._meas_nmsr:
+        #     logging.debug("self._meas_nmsr > 0 and self._ndata_notified >= self._meas_nmsr")
+        #     if self._meas_timer:
+        #         logging.info("_on_new_measurement calling cancel")
+        #         self._meas_timer.cancel()
+        #         self._meas_timer = None
+        #         logging.info("_meas_timer is None")
+        #     self._meas_cb = None
+        # else:
+        #     logging.info("else in on new measurement")
 
     def AVS_Measure(self, hdev, callback, nmsr):
         self._meas_nmsr = _val(nmsr)
         self._meas_tstart = time.time()
         self._meas_dur = self._meas_config.IntegrationTime / 1000 * self._meas_config.NrAverages
-        self._ndata_read = 0
 
-        if cast(callback, c_void_p):  # Not a null pointer
-            self._meas_cb = callback
-            self._meas_timer = util.RepeatingTimer(self._meas_dur, self._on_new_measurement, "Measurement callback thread")
-            self._meas_timer.start()
-        else:
-            self._meas_cb = None
+        self._ndata_read = 0
+        # self._ndata_notified = 0
+        logging.info("_meas_dur {} _meas_nmsr {}".format(self._meas_dur, self._meas_nmsr))
+        self._acquirer.stop()
+        if callback:  # Not a null pointer
+            self._acquirer.stop()
+            self._acquirer.start(self._meas_nmsr, self._meas_dur)
+            # if self._meas_timer is not None:
+            #     raise ValueError("measure timer not None")
+            # self._meas_cb = callback
+            # self._meas_timer = util.RepeatingTimer(self._meas_dur, self._on_new_measurement,
+            #                                        "Measurement callback thread")
+            # self._meas_timer.start()
+        # else:
+        #     self._meas_cb = None
 
     def AVS_StopMeasure(self, hdev):
         self._meas_nmsr = 0
         self._meas_cb = None
-        if self._meas_timer:
-            self._meas_timer.cancel()
-            self._meas_timer = None
+        self._acquirer.stop()
+        # if self._meas_timer:
+        #     logging.info("stop measure calling cancel")
+        #     self._meas_timer.cancel()
+        #     self._meas_timer = None
 
     def AVS_PrepareMeasure(self, hdev, meas_config):
         self._meas_config = _deref(meas_config, MeasConfigType)
 
     def AVS_PollScan(self, hdev):
+        # FIXME: update too
         if self._ndata_read < self._get_ndata_available():
             return c_int(1)
         else:
@@ -1222,4 +1349,3 @@ class FakeAvantesDLL(object):
             raise AvantesError(-9, "ERR_INVALID_SIZE")
 
         memmove(p_dev_param, byref(self._dev_config), sizeof(self._dev_config))
-
