@@ -3105,7 +3105,7 @@ def __init_resources():
                             <assign_var>1</assign_var>
                           </XRCED>
                         </object>
-                        <label>OPTICAL SETTINGS</label>
+                        <nocaption>1</nocaption>
                         <fg>#1A1A1A</fg>
                         <bg>#555555</bg>
                       </object>
