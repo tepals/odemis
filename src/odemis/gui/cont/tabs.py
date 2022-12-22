@@ -4772,7 +4772,6 @@ class EnzelAlignTab(Tab):
                 self.tab_data_model.align_mode.value = mode
                 return
 
-
     def _on_align_mode(self, align_mode):
         """
         Subscriber for the current alignment mode. (un)toggles the correct buttons and calls the setters of each mode.
@@ -5105,6 +5104,8 @@ class MimasAlignTab(Tab):
         # self._stage = main_data.stage
         # self._stage_global = main_data.stage_global
         # self._aligner = main_data.aligner
+        doc_path = pkg_resources.resource_filename("odemis.gui", "doc/mimas_alignment.html")
+        self.panel.html_alignment_doc.LoadPage(doc_path)
 
     @classmethod
     def get_display_priority(cls, main_data):
