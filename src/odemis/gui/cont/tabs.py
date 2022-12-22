@@ -22,7 +22,6 @@ You should have received a copy of the GNU General Public License along with
 Odemis. If not, see http://www.gnu.org/licenses/.
 
 """
-
 import collections
 from concurrent.futures import CancelledError
 from functools import partial
@@ -45,7 +44,7 @@ from odemis.gui.comp.popup import show_message
 from odemis.gui.cont.features import CryoFeatureController
 from odemis.gui.util.wx_adapter import fix_static_text_clipping
 from odemis.gui.win.acquisition import ShowChamberFileDialog
-from odemis.model import getVAs, InstantaneousFuture
+from odemis.model import getVAs, InstantaneousFuture, BAND_PASS_THROUGH
 from odemis.util.filename import guess_pattern, create_projectname
 
 from odemis import dataio
@@ -96,7 +95,7 @@ from odemis.gui.model import TOOL_ZOOM, TOOL_ROI, TOOL_ROA, TOOL_RO_ANCHOR, \
 from odemis.gui.util import call_in_wx_main, wxlimit_invocation
 from odemis.gui.util.widgets import ProgressiveFutureConnector, AxisConnector, \
     ScannerFoVAdapter, VigilantAttributeConnector
-from odemis.util import units, spot, limit_invocation, almost_equal
+from odemis.util import fluo, units, spot, limit_invocation, almost_equal
 from odemis.util.dataio import data_to_static_streams, open_acquisition
 from odemis.util.units import readable_str
 
@@ -352,7 +351,7 @@ class LocalizationTab(Tab):
         tab_data = guimod.CryoLocalizationGUIData(main_data)
         super(LocalizationTab, self).__init__(
             name, button, panel, main_frame, tab_data)
-        self.set_label("LOCALIZATION")
+        # self.set_label("LOCALIZATION")
 
         self.main_data = main_data
 
@@ -469,6 +468,12 @@ class LocalizationTab(Tab):
             # The stage is in the FM referential, but we care about the stage-bare
             # in the SEM referential to move between positions
             self._allowed_targets= [FM_IMAGING, SEM_IMAGING]
+            self._stage = self.tab_data_model.main.stage_bare
+        elif self.main_data.role == "mimas":
+            # Only useful in FM mode
+            self._allowed_targets = [FM_IMAGING]
+            # The stage-bare is used to check the position
+            # TODO: eventually we might not have a distinction stage/stage-bare
             self._stage = self.tab_data_model.main.stage_bare
 
         main_data.is_acquiring.subscribe(self._on_acquisition, init=True)
@@ -698,7 +703,7 @@ class LocalizationTab(Tab):
 
     @classmethod
     def get_display_priority(cls, main_data):
-        if main_data.role in ("enzel", "meteor"):
+        if main_data.role in ("enzel", "meteor"):  # TODO: , "mimas"
             return 2
         else:
             return None
@@ -5100,11 +5105,6 @@ class MimasAlignTab(Tab):
     def __init__(self, name, button, panel, main_frame, main_data):
         tab_data = guimod.MicroscopyGUIData(main_data)
         super().__init__(name, button, panel, main_frame, tab_data)
-        # self.set_label("ALIGNMENT")
-        self._stream_controllers = []
-        # self._stage = main_data.stage
-        # self._stage_global = main_data.stage_global
-        # self._aligner = main_data.aligner
 
         # Connect the view (for now, only optical)
         vpv = collections.OrderedDict([
@@ -5118,12 +5118,72 @@ class MimasAlignTab(Tab):
 
         self.view_controller = viewcont.ViewPortController(tab_data, panel, vpv)
 
-        # Needed? Just need a scheduler...
-        # self._streambar_controller = streamcont.SecomStreamsController(
-        #     tab_data,
-        #     panel.pnl_streams,
-        #     view_ctrl=self.view_controller
-        # )
+        # Create the Optical stream.
+        # The focuser is "aligner" to calibrate the optical focus (while the stage Z stays constant)
+        # It should typically show a widefield image, but we use a "FluoStream"
+        # because it still allows the user to pick any light and filter.
+        opt_stream = acqstream.FluoStream("Optical",
+                                                  main_data.ccd,
+                                                  main_data.ccd.data,
+                                                  main_data.light,
+                                                  main_data.light_filter,
+                                                  focuser=main_data.aligner,
+                                                  detvas=get_local_vas(main_data.ccd, main_data.hw_settings_config),
+                                                  )
+        opt_stream.tint.value = (255, 255, 255)  # greyscale, as it's widefield
+        # Select emission and excitation wavelengths to be widefield:
+        # * pick the smallest excitation as default
+        # * pick "pass-through" as default emission, and fallback to the smallest emission
+        ex = min(opt_stream.excitation.choices, key=fluo.get_one_center)
+        opt_stream.excitation.value = ex
+        if BAND_PASS_THROUGH in opt_stream.emission.choices:
+            em = BAND_PASS_THROUGH
+        else:
+            em = min(opt_stream.emission.choices, key=fluo.get_one_center)
+        opt_stream.emission.value = em
+
+        # Create scheduler/stream bar controller
+        self._streambar_controller = streamcont.StreamBarController(self.tab_data_model, panel.pnl_streams)
+
+        self._opt_spe = self._streambar_controller.addStream(opt_stream)
+        # remove the "remove" button and "eye" button
+        self._opt_spe.stream_panel.show_visible_btn(False)
+        self._opt_spe.stream_panel.show_remove_btn(False)
+
+        # TODO: remove the "OPTICAL" bar
+
+        # Disable the tab when the stage is not at the right position
+        main_data.is_acquiring.subscribe(self._on_acquisition, init=True)
+
+    def _on_acquisition(self, is_acquiring):
+        # When acquiring, the tab is automatically disabled and should be left as-is
+        # In particular, that's the state when moving between positions in the
+        # Chamber tab, and the tab should wait for the move to be complete before
+        # actually be enabled.
+        stage = self.tab_data_model.main.stage
+        if is_acquiring:
+            stage.position.unsubscribe(self._on_stage_pos)
+        else:
+            stage.position.subscribe(self._on_stage_pos, init=True)
+
+    def _on_stage_pos(self, pos):
+        """
+        Called when the stage is moved, enable the tab if position is imaging mode, disable otherwise
+
+        :param pos: (dict str->float) updated position of the stage
+        """
+        # TODO: only allow if in "IMAGING" => stage pos within the FM_IMAGING_RANGE
+        pass
+        # targets = (ALIGNMENT, THREE_BEAMS)
+        # guiutil.enable_tab_on_stage_position(self.button, self._stage, pos, targets,
+        #                                      tooltip="Alignment can only be performed in the three beams mode")
+
+    def Show(self, show=True):
+        super().Show(show)
+
+        # pause streams when not displayed
+        if not show:
+            self._streambar_controller.pauseStreams()
 
     @classmethod
     def get_display_priority(cls, main_data):
