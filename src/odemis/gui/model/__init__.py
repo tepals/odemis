@@ -672,10 +672,10 @@ class CryoGUIData(MicroscopyGUIData):
     Represents an interface for handling cryo microscopes.
     """
     def __init__(self, main):
-        if main.role not in ("enzel", "meteor"):
+        if main.role not in ("enzel", "meteor", "mimas"):
             raise ValueError(
-                "Expected a cryo microscope role but found it to be %s." % main.role)
-        MicroscopyGUIData.__init__(self, main)
+                "Expected a microscope role of 'enzel', 'meteor', or 'mimas' but found it to be %s." % main.role)
+        super().__init__(main)
 
     def add_new_feature(self, pos_x, pos_y, pos_z=None, f_name=None, milling_angle=DEFAULT_MILLING_ANGLE):
         """
@@ -735,10 +735,7 @@ class CryoLocalizationGUIData(CryoGUIData):
     """
 
     def __init__(self, main):
-        if main.role not in ("enzel", "meteor"):
-            raise ValueError(
-                "Microscope role was found to be %s, while expected 'enzel' or 'meteor'" % main.role)
-        CryoGUIData.__init__(self, main)
+        super().__init__(main)
 
         # Current tool selected (from the toolbar)
         tools = {TOOL_NONE, TOOL_RULER, TOOL_FEATURE}
