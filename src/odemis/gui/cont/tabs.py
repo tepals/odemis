@@ -99,6 +99,7 @@ from odemis.gui.util.widgets import ProgressiveFutureConnector, AxisConnector, \
 from odemis.util import fluo, units, spot, limit_invocation, almost_equal
 from odemis.util.dataio import data_to_static_streams, open_acquisition
 from odemis.util.units import readable_str
+import odemis.gui.comp.overlay.world as world_overlay
 
 # The constant order of the toolbar buttons
 TOOL_ORDER = (TOOL_ZOOM, TOOL_ROI, TOOL_ROA, TOOL_RO_ANCHOR, TOOL_RULER, TOOL_POINT,
@@ -5134,6 +5135,14 @@ class MimasAlignTab(Tab):
         ])
 
         self.view_controller = viewcont.ViewPortController(tab_data, panel, vpv)
+
+        # Add a CryoFeatureOverlay to the canvas, not to show the features, but
+        # to support moving the stage by double clicking, even if the stream is paused.
+        # (So that the user can move the stage when looking at the FIB image in the separate computer)
+        cnvs = panel.pnl_viewport.viewports[0].canvas
+        cryofeature_overlay = world_overlay.CryoFeatureOverlay(cnvs, tab_data)
+        cnvs.add_world_overlay(cryofeature_overlay)
+        cryofeature_overlay.active.value = True
 
         # Create the Optical stream.
         # The focuser is "aligner" to calibrate the optical focus (while the stage Z stays constant)
