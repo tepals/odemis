@@ -5106,6 +5106,25 @@ class MimasAlignTab(Tab):
         # self._stage_global = main_data.stage_global
         # self._aligner = main_data.aligner
 
+        # Connect the view (for now, only optical)
+        vpv = collections.OrderedDict([
+            (panel.pnl_viewport.viewports[0],  # focused view
+             {"name": "Optical",
+              # "cls": guimod.FeatureView,
+              "stage": main_data.stage,
+              "stream_classes": LiveStream,
+              }),
+        ])
+
+        self.view_controller = viewcont.ViewPortController(tab_data, panel, vpv)
+
+        # Needed? Just need a scheduler...
+        # self._streambar_controller = streamcont.SecomStreamsController(
+        #     tab_data,
+        #     panel.pnl_streams,
+        #     view_ctrl=self.view_controller
+        # )
+
     @classmethod
     def get_display_priority(cls, main_data):
         if main_data.role in ("mimas",):

@@ -264,7 +264,7 @@ class xrcpnl_tab_mimas_align(wx.Panel):
         self.pnl_viewport = xrc.XRCCTRL(self, "pnl_viewport")
         self.view_optical = xrc.XRCCTRL(self, "view_optical")
         self.scr_win_right = xrc.XRCCTRL(self, "scr_win_right")
-        self.stream_settings = xrc.XRCCTRL(self, "stream_settings")
+        self.pnl_streams = xrc.XRCCTRL(self, "pnl_streams")
 
 
 
@@ -3079,9 +3079,6 @@ def __init_resources():
           <object class="LiveViewport" name="view_optical">
             <fg>#BFBFBF</fg>
             <bg>#000000</bg>
-            <XRCED>
-              <assign_var>0</assign_var>
-            </XRCED>
           </object>
           <XRCED>
             <assign_var>1</assign_var>
@@ -3101,9 +3098,12 @@ def __init_resources():
                   <object class="sizeritem">
                     <object class="FoldPanelBar">
                       <object class="FoldPanelItem">
-                        <object class="StreamBar" name="stream_settings">
+                        <object class="StreamBar" name="pnl_streams">
                           <fg>#7F7F7F</fg>
                           <bg>#333333</bg>
+                          <XRCED>
+                            <assign_var>1</assign_var>
+                          </XRCED>
                         </object>
                         <label>OPTICAL SETTINGS</label>
                         <fg>#1A1A1A</fg>
