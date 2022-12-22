@@ -478,6 +478,8 @@ class LocalizationTab(Tab):
             # TODO: eventually we might not have a distinction stage/stage-bare
             self._stage = self.tab_data_model.main.stage_bare
 
+        self._aligner = self.tab_data_model.main.aligner
+
         main_data.is_acquiring.subscribe(self._on_acquisition, init=True)
 
     @property
@@ -694,9 +696,12 @@ class LocalizationTab(Tab):
         Called when the stage is moved, enable the tab if position is imaging mode, disable otherwise
         :param pos: (dict str->float or None) updated position of the stage
         """
-        guiutil.enable_tab_on_stage_position(self.button, self._stage, pos,
-                                             self._allowed_targets,
-                                             tooltip="Localization can only be performed in the three beams or SEM imaging modes")
+        guiutil.enable_tab_on_stage_position(
+            self.button, self._stage, pos,
+            self._allowed_targets,
+            self._aligner,
+            tooltip="Localization can only be performed in the three beams or SEM imaging modes"
+        )
 
     def terminate(self):
         super(LocalizationTab, self).terminate()
@@ -5225,7 +5230,7 @@ class MimasAlignTab(Tab):
         align_pos = align_md[model.MD_FAV_POS_ALIGN]
         align_pos_deactive = align_md[model.MD_FAV_POS_DEACTIVE]
 
-        current_pos_label = getCurrentPositionLabel(self._aligner.position.value, self._stage_bare, self._aligner)
+        current_pos_label = getCurrentPositionLabel(self._stage_bare.position.value, self._stage_bare, self._aligner)
         if current_pos_label == FM_IMAGING:
             self._aligner.moveAbs(align_pos).result()
         elif current_pos_label == MILLING:

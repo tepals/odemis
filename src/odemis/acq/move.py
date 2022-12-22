@@ -217,28 +217,28 @@ def _getCurrentMeteorPositionLabel(current_pos, stage):
     return UNKNOWN
 
 
-def _getCurrentMimasPositionLabel(current_pos, stage, aligner):
+def _getCurrentMimasPositionLabel(current_stage_pos, stage, aligner):
     """
     Detects the current aligner position of mimas
-    :param current_pos: (dict str->float) position of the aligner
+    :param current_stage_pos: (dict str->float) position of the stage
     :param stage: (Actuator) the stage component
     :param aligner: (Actuator) the align component
     returns a label LOADING, FM_IMAGING, MILLING or UNKNOWN
     """
     # meta data of meteor stage positions
     stage_md = stage.getMetadata()
-    current_stage_pos = stage.position.value
     stage_deactive = stage_md[model.MD_FAV_POS_DEACTIVE]
     stage_fm_imaging_rng = stage_md[model.MD_FM_IMAGING_RANGE]
 
+    current_align_pos = aligner.position.value
     aligner_md = aligner.getMetadata()
     aligner_fib = aligner_md[model.MD_FAV_POS_DEACTIVE]
     aligner_optical = aligner_md[model.MD_FAV_POS_ACTIVE]
 
     if _isInRange(current_stage_pos, stage_fm_imaging_rng, {'x', 'y', 'z'}):
-        if _isNearPosition(current_pos, aligner_fib, aligner.axes):
+        if _isNearPosition(current_align_pos, aligner_fib, aligner.axes):
             return MILLING
-        elif _isNearPosition(current_pos, aligner_optical, aligner.axes):
+        elif _isNearPosition(current_align_pos, aligner_optical, aligner.axes):
             return FM_IMAGING
     elif _isNearPosition(current_stage_pos, stage_deactive, stage.axes):
         return LOADING
