@@ -65,7 +65,8 @@ from odemis.acq.align.autofocus import Sparc2AutoFocus, Sparc2ManualFocus
 from odemis.acq.align.fastem import Calibrations
 from odemis.acq.move import GRID_1, LOADING, COATING, UNKNOWN, ALIGNMENT, LOADING_PATH, getCurrentGridLabel, \
     FM_IMAGING, SEM_IMAGING, GRID_2, getTargetPosition, POSITION_NAMES, THREE_BEAMS, \
-    get3beamsSafePos, SAFETY_MARGIN_5DOF, cryoSwitchSamplePosition, getMovementProgress, getCurrentPositionLabel
+    get3beamsSafePos, SAFETY_MARGIN_5DOF, cryoSwitchSamplePosition, getMovementProgress, getCurrentPositionLabel, \
+    MILLING
 from odemis.acq.stream import OpticalStream, SpectrumStream, TemporalSpectrumStream, \
     CLStream, EMStream, LiveStream, FIBStream, \
     ARStream, AngularSpectrumStream, CLSettingsStream, ARSettingsStream, MonochromatorSettingsStream, \
@@ -5106,6 +5107,14 @@ class MimasAlignTab(Tab):
         tab_data = guimod.MicroscopyGUIData(main_data)
         super().__init__(name, button, panel, main_frame, tab_data)
 
+        self._stage = main_data.stage
+        self._stage_bare = main_data.stage_bare
+        self._focus = main_data.focus
+        self._aligner = main_data.aligner
+
+        # Connect the "Reset Z alignment" button
+        panel.btn_reset_alignment.Bind(wx.EVT_BUTTON, self._on_click_reset)
+
         # Connect the view (for now, only optical)
         vpv = collections.OrderedDict([
             (panel.pnl_viewport.viewports[0],  # focused view
@@ -5150,8 +5159,6 @@ class MimasAlignTab(Tab):
         self._opt_spe.stream_panel.show_visible_btn(False)
         self._opt_spe.stream_panel.show_remove_btn(False)
 
-        # TODO: remove the "OPTICAL" bar
-
         # Disable the tab when the stage is not at the right position
         main_data.is_acquiring.subscribe(self._on_acquisition, init=True)
 
@@ -5191,6 +5198,28 @@ class MimasAlignTab(Tab):
             return 1
         else:
             return None
+
+    def _on_click_reset(self, evt):
+        """Reset the stage and align component, when the reset button is clicked."""
+        stage_pos = self._focus.getMetadata()[model.MD_FAV_POS_ACTIVE]
+        self._focus.moveAbs({"z": stage_pos["z"]}).result()
+
+        self._aligner.reference({"z"}).result()
+
+        align_md = self._aligner.getMetadata()
+        align_pos = align_md[model.MD_FAV_POS_ALIGN]
+        align_pos_deactive = align_md[model.MD_FAV_POS_DEACTIVE]
+
+        current_pos_label = getCurrentPositionLabel(self._aligner.position.value, self._stage_bare, self._aligner)
+        if current_pos_label == FM_IMAGING:
+            self._aligner.moveAbs(align_pos).result()
+        elif current_pos_label == MILLING:
+            self._aligner.moveAbs(align_pos_deactive)
+            self._aligner.updateMetadata({model.MD_FAV_POS_ACTIVE: align_pos})
+        else:
+            logging.warning(
+                f"Trying to reset z alignment while current position label is {POSITION_NAMES[current_pos_label]}"
+            )
 
 
 class SparcAlignTab(Tab):

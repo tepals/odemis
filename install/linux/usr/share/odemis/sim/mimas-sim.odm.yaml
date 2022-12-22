@@ -33,7 +33,6 @@ MIMAS-as-METEOR-sim: {
         # Loading position:
         FAV_POS_DEACTIVE: { 'rx': 0, 'rz': 1.9076449, 'x': -0.01529, 'y': 0.0506, 'z': 0.01975 },
         # XYZ ranges for SEM & METEOR
-        SEM_IMAGING_RANGE: {"x": [-10.e-3, 10.e-3], "y": [-5.e-3, 10.e-3], "z": [-0.5e-3, 8.e-3]},
         FM_IMAGING_RANGE: {"x": [0.040, 0.054], "y": [-5.e-3, 10.e-3], "z": [-0.5e-3, 8.e-3]},
         # Grid centers in SEM range
         # Adjusted so that at init (0,0,0), it's at the Grid 1.
@@ -42,9 +41,8 @@ MIMAS-as-METEOR-sim: {
         POS_COR: [0.02447, -0.000017],
         # Active tilting (rx) & rotation (rz) angles positions when switching between SEM & FM, in radians.
         # Note: these values are calibrated at installation time.
-        FAV_FM_POS_ACTIVE: {"rx": 0.12213888553625313  , "rz":  5.06145}, # 7° - 270°
-        # Typically rz = 110°, but we make it 0 so that at init it looks like in SEM position
-        FAV_SEM_POS_ACTIVE: {"rx": 0, "rz": 0}    # Note that milling angle (rx) can be changed per session 
+        FAV_FM_POS_ACTIVE: {"rx": 0.12213888553625313  , "rz":  5.06145, # 7° - 270°
+                            "x": 0, "y": 0, "z": 40.0e-6},
     },
 }
 
