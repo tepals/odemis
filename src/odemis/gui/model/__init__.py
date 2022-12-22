@@ -390,7 +390,7 @@ class MainGUIData(object):
                 # So the fine alignment dwell time should be at least 0.2 s.
                 self.fineAlignDwellTime.value = 0.5
 
-            if microscope.role in ["meteor", "enzel"]:
+            if microscope.role in ["meteor", "enzel", "mimas"]:
                 # List VA contains all the CryoFeatures
                 self.features = model.ListVA()
                 # VA for the currently selected feature

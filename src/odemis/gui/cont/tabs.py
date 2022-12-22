@@ -468,7 +468,7 @@ class LocalizationTab(Tab):
         elif self.main_data.role == "meteor":
             # The stage is in the FM referential, but we care about the stage-bare
             # in the SEM referential to move between positions
-            self._allowed_targets= [FM_IMAGING, SEM_IMAGING]
+            self._allowed_targets = [FM_IMAGING, SEM_IMAGING]
             self._stage = self.tab_data_model.main.stage_bare
         elif self.main_data.role == "mimas":
             # Only useful in FM mode
@@ -551,9 +551,11 @@ class LocalizationTab(Tab):
         if bbox[0] is not None:
             self.panel.vp_secom_tl.canvas.fit_to_bbox(bbox)
 
-        # Display the same acquired data in the chamber tab view
-        chamber_tab = self.main_data.getTabByName("cryosecom_chamber")
-        chamber_tab.load_overview_streams(streams)
+        # Mimas does not have the overview image in the chamber tab, so don't display it there.
+        if self.main_data.role in ["meteor", "enzel"]:
+            # Display the same acquired data in the chamber tab view
+            chamber_tab = self.main_data.getTabByName("cryosecom_chamber")
+            chamber_tab.load_overview_streams(streams)
 
     def reset_live_streams(self):
         """
@@ -704,7 +706,7 @@ class LocalizationTab(Tab):
 
     @classmethod
     def get_display_priority(cls, main_data):
-        if main_data.role in ("enzel", "meteor"):  # TODO: , "mimas"
+        if main_data.role in ("enzel", "meteor", "mimas"):
             return 2
         else:
             return None
