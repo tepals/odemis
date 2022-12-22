@@ -5100,6 +5100,9 @@ class EnzelAlignTab(Tab):
 class MimasAlignTab(Tab):
     """
     Tab to perform the beam alignment of MIMAS.
+    There are two alignments:
+    * adjust the optical focus using the "align", while the stage Z is fixed.
+    * adjust the X/Y of beam shift so that the optical lens and ion beam lens are centered
     """
 
     def __init__(self, name, button, panel, main_frame, main_data):
@@ -5110,11 +5113,10 @@ class MimasAlignTab(Tab):
         self._stage_bare = main_data.stage_bare
         self._focus = main_data.focus
         self._aligner = main_data.aligner
-        # self._stage_global = main_data.stage_global
-        # self._aligner = main_data.aligner
+
+        # Show the procedure steps
         doc_path = pkg_resources.resource_filename("odemis.gui", "doc/mimas_alignment.html")
         self.panel.html_alignment_doc.LoadPage(doc_path)
-
 
         # Connect the "Reset Z alignment" button
         panel.btn_reset_alignment.Bind(wx.EVT_BUTTON, self._on_click_reset)
@@ -5189,27 +5191,25 @@ class MimasAlignTab(Tab):
         # guiutil.enable_tab_on_stage_position(self.button, self._stage, pos, targets,
         #                                      tooltip="Alignment can only be performed in the three beams mode")
 
-    def Show(self, show=True):
-        super().Show(show)
-
-        # pause streams when not displayed
-        if not show:
-            self._streambar_controller.pauseStreams()
-
-    @classmethod
-    def get_display_priority(cls, main_data):
-        if main_data.role in ("mimas",):
-            return 1
-        else:
-            return None
-
     def _on_click_reset(self, evt):
         """Reset the stage and align component, when the reset button is clicked."""
+        # Note: it is blocking the GUI. However, the moves should be quite fast,
+        # so it won't be blocking for long.
+        # TODO: instead of blocking the GUI, disable the buttons, and
+        # after starting the first move, add a "done_callback" to handle the moves
+        # in the background.
+
+        # Move the Z stage back to the original position
         stage_pos = self._focus.getMetadata()[model.MD_FAV_POS_ACTIVE]
         self._focus.moveAbs({"z": stage_pos["z"]}).result()
 
+        # Re-reference the optical lens. Typically it shouldn't be needed, but
+        # it should always be safe and fast, and might add a tiny bit of move precision.
         self._aligner.reference({"z"}).result()
 
+        # Move the aligner back to the default engage position, if currently in Optical mode
+        # If it's FIB mode, just go back to FIB mode, and update the engage position
+        # to the default position.
         align_md = self._aligner.getMetadata()
         align_pos = align_md[model.MD_FAV_POS_ALIGN]
         align_pos_deactive = align_md[model.MD_FAV_POS_DEACTIVE]
@@ -5224,6 +5224,20 @@ class MimasAlignTab(Tab):
             logging.warning(
                 f"Trying to reset z alignment while current position label is {POSITION_NAMES[current_pos_label]}"
             )
+
+    def Show(self, show=True):
+        super().Show(show)
+
+        # Pause streams when not displayed
+        if not show:
+            self._streambar_controller.pauseStreams()
+
+    @classmethod
+    def get_display_priority(cls, main_data):
+        if main_data.role in ("mimas",):
+            return 5
+        else:
+            return None
 
 
 class SparcAlignTab(Tab):
