@@ -1953,7 +1953,8 @@ class FastEMOverviewTab(Tab):
             tab_data,
             panel,
             calib_prefix="calib",
-            calibrations=[Calibrations.OPTICAL_AUTOFOCUS]
+            calibrations=[Calibrations.OPTICAL_AUTOFOCUS],
+            btn_label="Optical Autofocus",
         )
 
         # Acquisition controller

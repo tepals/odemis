@@ -557,13 +557,14 @@ class FastEMCalibrationController:
     Controls the calibration button to start the calibration and the process in the calibration panel
     in the FastEM overview and acquisition tab.
     """
-    def __init__(self, tab_data, tab_panel, calib_prefix, calibrations):
+    def __init__(self, tab_data, tab_panel, calib_prefix, calibrations, btn_label="Calibrate"):
         """
         :param tab_data: (FastEMAcquisitionGUIData) The representation of the microscope GUI.
         :param tab_panel: (wx.Frame) The calibration panel, which contains the calibration button to start
                           the calibration, and the gauge and the label of the gauge to indicate the progress.
         :param calib_prefix: (str) A prefix, which can indicate the order/type of the calibration (e.g. "calib_1").
         :param calibrations: (list[Calibrations]) List of calibrations that should be run.
+        :param btn_label: (str) Label of the button that runs the calibrations.
         """
         self._tab_data = tab_data
         self._main_data_model = tab_data.main
@@ -574,6 +575,7 @@ class FastEMCalibrationController:
         self.button = getattr(tab_panel, calib_prefix + "_btn")
         self.gauge = getattr(tab_panel, calib_prefix + "_gauge")
         self.label = getattr(tab_panel, calib_prefix + "_label")
+        self.btn_label = btn_label
 
         # add attribute that keeps track of calibration status
         setattr(self, "is_" + calib_prefix + "_done", getattr(tab_data, "is_" + calib_prefix + "_done"))
@@ -665,7 +667,7 @@ class FastEMCalibrationController:
             self.button.SetLabel("Cancel")  # indicate canceling is possible
             self.gauge.Show()  # show progress bar
         else:
-            self.button.SetLabel("Calibrate")  # change button label back to ready for calibration
+            self.button.SetLabel(self.btn_label)  # change button label back to ready for calibration
             self.gauge.Hide()  # hide progress bar
 
         if text is not None:
