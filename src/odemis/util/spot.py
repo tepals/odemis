@@ -299,7 +299,7 @@ def MaximaFind(image, qty, len_object=18):
     mean = ndimage.mean(filtered, labels=labels, index=index)
     si = numpy.argsort(mean)[::-1][:qty]
     # Estimate spot center positions.
-    pos = numpy.array(ndimage.center_of_mass(filtered, labels=labels, index=index[si]))[:, ::-1]
+    pos = numpy.array(ndimage.center_of_mass(filtered, labels=labels, index=index[si]))
 
     if numpy.any(numpy.isnan(pos)):
         pos = pos[numpy.any(~numpy.isnan(pos), axis=1)]
@@ -309,9 +309,9 @@ def MaximaFind(image, qty, len_object=18):
     refined_center = numpy.zeros_like(pos)
     pos = numpy.rint(pos).astype(numpy.int16)
     y_max, x_max = image.shape
-    for idx, xy in enumerate(pos):
-        x_start, y_start = xy - w + 1
-        x_end, y_end = xy + w
+    for idx, yx in enumerate(pos):
+        y_start, x_start = yx - w + 1
+        y_end, x_end = yx + w
         # If the spot is near the edge of the image, crop so it is still in the center of the sub-image. Subtract the
         # value of x/y_start from x/y_end to keep the spot in the center when x/y_start is set to 0. Add the difference
         # between x/y_end and x/y_max to x/y_start to keep the spot in the center when x/y_end is set to x/y_max.
@@ -328,8 +328,10 @@ def MaximaFind(image, qty, len_object=18):
             y_start += y_end - y_max
             y_end = y_max
         spot = filtered[y_start:y_end, x_start:x_end]
-        refined_center[idx] = numpy.array(FindCenterCoordinates(spot))
-    refined_position = pos + refined_center
+        refined_center[idx] = numpy.array(radial_symmetry_center(spot))
+    # radial_symmetry_center refines the spot with respect to the top left of the cropped image,
+    # add -w + 1 to get the refined center with respect to the center of the cropped image.
+    refined_position = pos + refined_center - w + 1
     return refined_position
 
 

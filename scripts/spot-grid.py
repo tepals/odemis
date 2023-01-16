@@ -54,7 +54,7 @@ class VideoDisplayerGrid(VideoDisplayer):
         data (numpy.ndarray): an 2D array containing the image (can be 3D if in RGB)
         """
         self.app.spots, trans, scale, rot, shear = FindGridSpots(data, self.gridsize)
-        self.app.translation = trans[0], data.shape[0] - trans[1]
+        self.app.translation = trans
         self.app.scale = scale
         self.app.rotation = -rot
         self.app.shear = shear
@@ -103,10 +103,10 @@ class ImageWindowApp(wx.App):
         width = self.img.Width
         spot_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
         ctx = cairo.Context(spot_surface)
-        ctx.scale(width, height)
-        spots = numpy.abs(self.spots) * self.magn / numpy.array([width, height])
+        spots = numpy.abs(self.spots) * self.magn
+        # flip x and y, because cairo expects the x first and y second with the origin in the top-left
+        spots = spots[:, ::-1]
 
-        # draw a polygon connecting all spots
         ctx.save()
         prev = spots[0]
         ctx.translate(*prev)
@@ -114,26 +114,25 @@ class ImageWindowApp(wx.App):
             delta = spot - prev
             ctx.line_to(*delta)
         ctx.set_source_rgb(0.98, 0.91, 0.62)
-        ctx.set_line_width(0.002)
-        ctx.set_dash((0.005, 0.002))
+        ctx.set_line_width(2)
+        ctx.set_dash((10, 4))
         ctx.stroke()
         ctx.restore()
 
-        # draw a square at the first spot, and a circle at every other spot
-        ctx.save()
         ctx.set_source_rgb(0.8, 0.1, 0.1)
-        ctx.set_line_width(0.002)
+        ctx.set_line_width(2)
         prev = spots[0]
         ctx.translate(*prev)
-        ctx.rectangle(-0.005, -0.005, 0.01, 0.01)
+        ctx.rectangle(-5, -5, 10, 10)
+        ctx.arc(0, 0, 5, 0, 2 * numpy.pi)
+        ctx.fill()
         ctx.stroke()
         for spot in spots[1:]:
             delta = spot - prev
             prev = spot
             ctx.translate(*delta)
-            ctx.arc(0, 0, 0.0025, 0, 2 * numpy.pi)
+            ctx.arc(0, 0, 5, 0, 2 * numpy.pi)
             ctx.fill()
-        ctx.restore()
 
         text_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
         info = [

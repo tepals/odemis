@@ -196,18 +196,19 @@ class TestFindGridSpots(unittest.TestCase):
         """
         image = numpy.zeros((256, 256))
         # set a grid of 8 by 8 points to 1
-        image[54:150:12, 54:150:12] = 1
+        image[54:150:12, 54:246:24] = 1
         spot_coordinates, translation, scaling, rotation, shear = spot.FindGridSpots(image, (8, 8), method=GRID_AFFINE)
         self.assertAlmostEqual(rotation, 0, places=4)
         self.assertAlmostEqual(shear, 0, places=10)
         # create a grid that contains the coordinates of the spots
-        xv = numpy.arange(54, 150, 12)
-        xx, yy = numpy.meshgrid(xv, xv)
-        grid = numpy.column_stack((xx.ravel(), yy.ravel()))
+        yv = numpy.arange(54, 150, 12)
+        xv = numpy.arange(54, 246, 24)
+        yy, xx = numpy.meshgrid(yv, xv)
+        grid = numpy.column_stack((yy.ravel(), xx.ravel()))
         numpy.testing.assert_array_almost_equal(numpy.sort(spot_coordinates, axis=1), numpy.sort(grid, axis=1),
                                                 decimal=2)
-        numpy.testing.assert_array_almost_equal(translation, numpy.array([96, 96]), decimal=3)
-        numpy.testing.assert_array_almost_equal(scaling, numpy.array([12, 12]), decimal=3)
+        numpy.testing.assert_array_almost_equal(translation, numpy.array([96, 138]), decimal=3)
+        numpy.testing.assert_array_almost_equal(scaling, numpy.array([12, 24]), decimal=3)
 
     def test_find_grid_similarity(self):
         """
