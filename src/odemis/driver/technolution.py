@@ -438,7 +438,7 @@ class AcquisitionServer(model.HwComponent):
         response = self.asmApiGetCall("/monitor/item?item_name=" + item_name, 200)
         return response
 
-    def _assembleCalibrationMetadata(self):
+    def assembleCalibrationParameters(self, descan_calib=True, scan_calib=True):
         """
         Assemble the calibration data and retrieve the input values from the scanner, descanner and mppc VA's.
         :return calibration_data: (CalibrationLoopParameters object) Calibration data object which contains all
@@ -450,26 +450,47 @@ class AcquisitionServer(model.HwComponent):
         total_line_scan_time = self._mppc.getTotalLineScanTime()
 
         # get the scanner setpoints
-        x_descan_setpoints, y_descan_setpoints = self._mirror_descanner.getCalibrationSetpoints(total_line_scan_time)
+        x_descan_setpoints, y_descan_setpoints = self._mirror_descanner.getCalibrationSetpoints(
+            total_line_scan_time
+        )
+        if not descan_calib:  # ugly hack to get all 0 setpoints
+            descan_amplitude = convertRange(descanner.scanAmplitude.value,
+                                            numpy.array(descanner.scanAmplitude.range)[:, 1],
+                                            I16_SYM_RANGE)
+            x_descan_setpoints = [int(descan_amplitude[0])] * len(x_descan_setpoints)
+            y_descan_setpoints = [int(descan_amplitude[1])] * len(y_descan_setpoints)
 
         # get the descanner setpoints
         x_scan_setpoints, y_scan_setpoints, scan_calibration_dwell_time_ticks = \
             self._ebeam_scanner.getCalibrationSetpoints(total_line_scan_time)
 
+        if not scan_calib:  # ugly hack to get all 0 setpoints
+            scan_amplitude = convertRange(scanner.scanAmplitude.value,
+                                          numpy.array(scanner.scanAmplitude.range)[:, 1],
+                                          VOLT_RANGE)
+            x_scan_setpoints = [int(scan_amplitude[0])] * len(x_scan_setpoints)
+            # y stays a sawtooth
+            # y_scan_setpoints = [int(scan_amplitude[1])] * len(y_scan_setpoints)
+
+        x_descan_offset = 0
+        y_descan_offset = 0
+        x_scan_offset = 0.0
+        y_scan_offset = 0.0
+
         calibration_data = CalibrationLoopParameters(descanner.rotation.value,
-                                                     0,  # Descan X offset parameter unused.
+                                                     x_descan_offset,  # Descan X offset parameter unused.
                                                      x_descan_setpoints,
-                                                     0,  # Descan Y offset parameter unused.
+                                                     y_descan_offset,  # Descan Y offset parameter unused.
                                                      y_descan_setpoints,
                                                      scan_calibration_dwell_time_ticks,
                                                      scanner.rotation.value,
                                                      scanner.getTicksScanDelay()[0],
-                                                     0.0,  # Scan X offset parameter unused.
+                                                     x_scan_offset,  # Scan X offset parameter unused.
                                                      x_scan_setpoints,
-                                                     0.0,  # Scan Y offset parameter unused.
+                                                     y_scan_offset,  # Scan Y offset parameter unused.
                                                      y_scan_setpoints)
 
-        return calibration_data
+        self._calibrationParameters = calibration_data
 
     def _setCalibrationMode(self, mode):
         """
@@ -494,7 +515,7 @@ class AcquisitionServer(model.HwComponent):
                 self.asmApiPostCall("/scan/stop_calibration_loop", 204)
 
             # Retrieve and assemble calibration metadata.
-            self._calibrationParameters = self._assembleCalibrationMetadata()
+            # self._calibrationParameters = self._assembleCalibrationParameters()
             self.asmApiPostCall("/scan/start_calibration_loop", 204, data=self._calibrationParameters.to_dict())
             return True
 
@@ -1015,8 +1036,8 @@ class MirrorDescanner(model.Emitter):
         :param total_line_scan_time: (float) Total line scanning time in seconds including
                                      overscanned pixels and flyback time. TODO do we need the flyback?
         :return:
-                x_setpoints (list of ints): The calibration setpoints in x direction in bits.
-                y_setpoints (list of ints): The calibration setpoints in y direction in bits.
+            x_setpoints (list of ints): The calibration setpoints in x direction in bits.
+            y_setpoints (list of ints): The calibration setpoints in y direction in bits.
         """
         # The calibration frequency is the inverse of the total line scan time.
         calibration_frequency = 1 / total_line_scan_time  # [1/sec]
@@ -1030,10 +1051,12 @@ class MirrorDescanner(model.Emitter):
         # [-2**15, 2**15] and finally clipped to [-2**15, 2**15 - 1] before send to the ASM.
 
         # convert offset and amplitude from [a.u.] to [bits]
-        sine_offset = convertRange(self.scanOffset.value,
-                                   numpy.array(self.scanOffset.range)[:, 1], I16_SYM_RANGE)  # [bits]
-        sine_amplitude = convertRange(self.scanAmplitude.value,
-                                      numpy.array(self.scanAmplitude.range)[:, 1], I16_SYM_RANGE)  # [bits]
+        offset = convertRange(self.scanOffset.value,
+                              numpy.array(self.scanOffset.range)[:, 1],
+                              I16_SYM_RANGE)  # [bits]
+        amplitude = convertRange(self.scanAmplitude.value,
+                                 numpy.array(self.scanAmplitude.range)[:, 1],
+                                 I16_SYM_RANGE)  # [bits]
 
         timestamps_setpoints = numpy.linspace(0, total_line_scan_time, number_setpoints)  # [sec]
         # setpoints in x direction resemble a sine
@@ -1045,8 +1068,8 @@ class MirrorDescanner(model.Emitter):
         #     *      *           *
         #       *  *
         #
-        x_setpoints = sine_offset[0] + sine_amplitude[0] * \
-                      numpy.sin(2 * math.pi * calibration_frequency * timestamps_setpoints)  # [bits+bits*sec/sec=bits]
+        # [bits + bits * sec / sec = bits]
+        x_setpoints = offset[0] + amplitude[0] * numpy.sin(2 * math.pi * calibration_frequency * timestamps_setpoints)
 
         # setpoints in y direction are constant (=0)
         y_setpoints = 0 * timestamps_setpoints  # [bits]

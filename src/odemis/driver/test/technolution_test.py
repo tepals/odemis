@@ -241,7 +241,7 @@ class TestAcquisitionServer(unittest.TestCase):
 
         scanner.dwellTime.value = 1.e-06
 
-        calibration_parameters = ASM._assembleCalibrationMetadata()
+        calibration_parameters = ASM.assembleCalibrationParameters()
 
         # Check types of calibration parameters
         self.assertIsInstance(calibration_parameters, CalibrationLoopParameters)
@@ -268,7 +268,56 @@ class TestAcquisitionServer(unittest.TestCase):
             self.assertIsInstance(x_setpoint, float)
             self.assertIsInstance(y_setpoint, float)
 
-    @unittest.skip  # for debugging only
+    def test_calibration(self):
+        ccd = model.getComponent(role="diagnostic-ccd")
+        # Step 1
+        self.ASM_manager.assembleCalibrationParameters(descan_calib=False, scan_calib=True)
+        self.ASM_manager.calibrationMode.value = True
+
+        # Step 2
+        self.ASM_manager.assembleCalibrationParameters(descan_calib=True, scan_calib=False)
+        self.ASM_manager.calibrationMode.value = True
+
+        # Step 3
+        calibration_parameters = self.ASM_manager._calibrationParameters
+        total_line_scan_time = (calibration_parameters.dwell_time
+                                * self.EBeamScanner.clockPeriod.value
+                                * len(calibration_parameters.x_scan_setpoints))
+
+        calibration_frequency = 1 / total_line_scan_time
+        calibration_phase_shifts = numpy.deg2rad(numpy.linspace(0, 180, 7))  # every 30 degrees
+        amplitude_list = []
+        for phase in calibration_phase_shifts:
+            scan_delay = phase / (2 * math.pi * calibration_frequency)
+            self.EBeamScanner.scanDelay.value = (scan_delay, self.EBeamScanner.scanDelay.value[1])
+            self.ASM_manager.assembleCalibrationParameters(descan_calib=True, scan_calib=True)
+            self.ASM_manager.calibrationMode.value = True
+
+            image = ccd.data.get(asap=False)
+            amplitude = self.calculate_amplitude(image)
+            amplitude_list.append(amplitude)
+
+    def calculate_amplitude(self, image: numpy.ndarray) -> float:
+        """
+        The amplitude of the sine in the input image is determined. The sine wave in the image is fitted after
+        normalizing the frequency of the sine wave, via this fit the amplitude is found.
+
+        :param image: (model.DataArray shape=(width, height)) Image from the diagnostic camera
+        :return amplitude (float >= 0): Amplitude of the sine wave, the parameter `a` in the function `f(x) = a * sin(x +
+        phi) + b`.
+        """
+        i, j = locate_curve_from_image(image)
+        waveform_coordinates = numpy.array([to_physical_space((y, x), image.shape) for x, y in zip(i, j)])
+        x = waveform_coordinates[:, 0]
+        y = -(waveform_coordinates[:, 1] + min(waveform_coordinates[:, 1]))  # Shift so that the sin wave starts at 0))
+        k = 2. * numpy.pi / (SIZE_WAVEFORM_DC_RES * image.shape[0])
+        y_normalized = k * y  # Normalize and make dimensionless
+
+        # Flipped x/y because the sinus waveform is displayed vertically on the DC
+        amplitude, phase, offset = fit_sine_to_coords(y_normalized, x)
+        return amplitude
+
+    # @unittest.skip  # for debugging only
     def test_plot_calibration_setpoints(self):
         """Plot the calibration scanner and descanner setpoint profiles.
         x scanner: sine
@@ -276,16 +325,23 @@ class TestAcquisitionServer(unittest.TestCase):
         x descanner: sine
         y descanner: flat line
         """
-        self.EBeamScanner.dwellTime.value = 5.e-06
-        self.MirrorDescanner.scanOffset.value = (0.1, 0.0)
-        self.MirrorDescanner.scanAmplitude.value = (0.5, 0.0)
-        self.EBeamScanner.scanOffset.value = (0.2, 0.1)
-        self.EBeamScanner.scanAmplitude.value = (0.4, 0.5)
-        self.ASM_manager.calibrationMode.value = True
+        descan_offset_au = (0.1, 0.0)
+        descan_amplitude_au = (0.5, 0.0)
+        scan_offset_au = (0.2, 0.1)
+        scan_amplitude_au = (0.4, 0.5)
 
+        self.EBeamScanner.dwellTime.value = 5.e-06
+        self.MirrorDescanner.scanOffset.value = descan_offset_au
+        self.MirrorDescanner.scanAmplitude.value = descan_amplitude_au
+        self.EBeamScanner.scanOffset.value = scan_offset_au
+        self.EBeamScanner.scanAmplitude.value = scan_amplitude_au
+
+        self.ASM_manager.assembleCalibrationParameters(descan_calib=True, scan_calib=False)
         calibration_parameters = self.ASM_manager._calibrationParameters
-        total_line_scan_time = calibration_parameters.dwell_time * self.EBeamScanner.clockPeriod.value * \
-                               len(calibration_parameters.x_scan_setpoints)
+        self.ASM_manager.calibrationMode.value = True
+        total_line_scan_time = (calibration_parameters.dwell_time
+                                * self.EBeamScanner.clockPeriod.value
+                                * len(calibration_parameters.x_scan_setpoints))
 
         x_descan_setpoints = numpy.array(calibration_parameters.x_descan_setpoints)
         y_descan_setpoints = numpy.array(calibration_parameters.y_descan_setpoints)
@@ -293,24 +349,47 @@ class TestAcquisitionServer(unittest.TestCase):
         y_scan_setpoints = numpy.array(calibration_parameters.y_scan_setpoints)
 
         timestamps_descanner = numpy.arange(0, total_line_scan_time, self.MirrorDescanner.clockPeriod.value)
-        timestamps_scanner = numpy.arange(0, total_line_scan_time,
-                                          total_line_scan_time / len(calibration_parameters.x_scan_setpoints))
+        timestamps_scanner = numpy.arange(
+            0,
+            total_line_scan_time,
+            total_line_scan_time / len(calibration_parameters.x_scan_setpoints)
+        )
+
+        descan_amplitude = convertRange(descan_amplitude_au,
+                                        numpy.array(self.MirrorDescanner.scanAmplitude.range)[:, 1],
+                                        I16_SYM_RANGE)
+        descan_offset = convertRange(descan_offset_au,
+                                     numpy.array(self.MirrorDescanner.scanOffset.range)[:, 1],
+                                     I16_SYM_RANGE)
+
+        scan_amplitude = convertRange(scan_amplitude_au,
+                                      numpy.array(self.EBeamScanner.scanAmplitude.range)[:, 1],
+                                      VOLT_RANGE)
+        scan_offset = convertRange(scan_offset_au,
+                                   numpy.array(self.EBeamScanner.scanOffset.range)[:, 1],
+                                   VOLT_RANGE)
 
         fig, axs = plt.subplots(2)
         fig.tight_layout(pad=3.0)  # add some space between subplots so that the axes labels are not hidden
-        # Shift scanner values up by 20% of max to make both visible in the same plot.
-        upwards_shift = 0.2 * max(x_descan_setpoints)
-        axs[0].plot(timestamps_descanner, upwards_shift + x_descan_setpoints, "ro", markersize=0.5,
-                    label="Descanner x setpoints")
-        axs[0].plot(timestamps_descanner, upwards_shift + y_descan_setpoints, "bo", markersize=0.5,
-                    label="Descanner y setpoints")
+        axs[0].plot(timestamps_descanner, x_descan_setpoints, "o", markersize=2, label="X setpoints")
+        axs[0].plot(timestamps_descanner, y_descan_setpoints, "o", markersize=2, label="Y setpoints")
         axs[0].set_xlabel("line scanning time [sec]")
         axs[0].set_ylabel("setpoints [bits]")
+        axs[0].set_title(
+            f"Descanner setpoints, \n"
+            f"scan amplitude x: {int(descan_amplitude[0])}, y: {int(descan_amplitude[1])}\n"
+            f"scan offset x: {int(descan_offset[0])}, y: {int(descan_offset[1])}"
+        )
 
-        axs[1].plot(timestamps_scanner, x_scan_setpoints, "rx", markersize=0.5, label="Scanner x setpoints")
-        axs[1].plot(timestamps_scanner, y_scan_setpoints, "bx", markersize=0.5, label="Scanner y setpoints")
+        axs[1].plot(timestamps_scanner, x_scan_setpoints, "o", markersize=2, label="X setpoints")
+        axs[1].plot(timestamps_scanner, y_scan_setpoints, "o", markersize=2, label="Y setpoints")
         axs[1].set_xlabel("line scanning time [sec]")
         axs[1].set_ylabel("setpoints [V]")
+        axs[1].set_title(
+            f"Scanner setpoints\n"
+            f"scan amplitude x: {scan_amplitude[0]}, y: {scan_amplitude[1]}\n"
+            f"scan offset x: {scan_offset[0]}, y: {scan_offset[1]}"
+        )
 
         axs[0].legend(loc="upper left")
         axs[1].legend(loc="upper left")
@@ -688,6 +767,10 @@ class TestEBeamScanner(unittest.TestCase):
         #
         # TODO evaluate what accuracy is needed for the calibration
         # check that the minimum x setpoint of the sine equals offset - amplitude in [V]
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        ax.plot(x_scan_setpoints)
+        plt.show()
         self.assertAlmostEqual(min(x_scan_setpoints),
                                convertRange(scanner.scanOffset.value[0] - scanner.scanAmplitude.value[0],
                                             numpy.array(scanner.scanAmplitude.range)[:, 1],
@@ -1209,7 +1292,10 @@ class TestMirrorDescanner(unittest.TestCase):
         # TODO Do we need the flyback included for calibration of the scan delay?
 
         x_descan_setpoints, y_descan_setpoints = descanner.getCalibrationSetpoints(total_line_scan_time)
-
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        ax.plot(x_descan_setpoints, "o")
+        plt.show()
         # check that the minimum x setpoint of the sine equals offset - amplitude in [bits]
         # use almost equal as the max/min setpoints can be equal or smaller than the absolute amplitude
         # Note: There is not necessarily a setpoint at the max/min amplitude of the sine.
