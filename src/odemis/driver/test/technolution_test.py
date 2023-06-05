@@ -336,7 +336,7 @@ class TestAcquisitionServer(unittest.TestCase):
         self.EBeamScanner.scanOffset.value = scan_offset_au
         self.EBeamScanner.scanAmplitude.value = scan_amplitude_au
 
-        self.ASM_manager.assembleCalibrationParameters(descan_calib=True, scan_calib=False)
+        self.ASM_manager.assembleCalibrationParameters(descan_calib=False, scan_calib=True)
         calibration_parameters = self.ASM_manager._calibrationParameters
         self.ASM_manager.calibrationMode.value = True
         total_line_scan_time = (calibration_parameters.dwell_time
@@ -348,7 +348,7 @@ class TestAcquisitionServer(unittest.TestCase):
         x_scan_setpoints = numpy.array(calibration_parameters.x_scan_setpoints)
         y_scan_setpoints = numpy.array(calibration_parameters.y_scan_setpoints)
 
-        timestamps_descanner = numpy.arange(0, total_line_scan_time, self.MirrorDescanner.clockPeriod.value)
+        timestamps_descanner = numpy.arange(0, total_line_scan_time, 5*self.MirrorDescanner.clockPeriod.value)
         timestamps_scanner = numpy.arange(
             0,
             total_line_scan_time,

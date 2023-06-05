@@ -657,12 +657,12 @@ class EBeamScanner(model.Emitter):
         timestamps_setpoints = numpy.linspace(0, total_line_scan_time, number_setpoints)  # [sec]
         # setpoints in x direction resemble a sine
         x_setpoints = scan_offset[0] + scan_amplitude[0] * \
-                      numpy.sin(2 * math.pi * calibration_frequency * timestamps_setpoints)  # [V + V * sec/sec = V]
+                      numpy.sin(2 * math.pi * 5 * calibration_frequency * timestamps_setpoints)  # [V + V * sec/sec = V]
         # setpoints in y direction resemble a sawtooth profile
         y_setpoints = scan_offset[1] + scan_amplitude[1] * \
                       signal.sawtooth(2 * math.pi * calibration_frequency * timestamps_setpoints)  # [V]
 
-        return x_setpoints.tolist(), y_setpoints.tolist(), calibration_dwell_time_ticks
+        return x_setpoints.tolist(), y_setpoints.tolist(), 5 * calibration_dwell_time_ticks
 
     def getCalibrationDwellTime(self, total_line_scan_time):
         """
