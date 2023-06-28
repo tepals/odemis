@@ -1170,27 +1170,29 @@ class TestMirrorDescanner(unittest.TestCase):
         # as this is the maximum value the ASM accepts
         self.assertEqual(max(y_descan_setpoints), I16_SYM_RANGE[1] - 1)
 
-    @unittest.skip  # for debugging only
+    # @unittest.skip  # for debugging only
     def test_plot_getAcqSetpoints(self):
         """Plot the acquisition descan setpoint profiles."""
-        self.EBeamScanner.dwellTime.value = 5e-6  # Increase dwell time to see steps in the profile better
-        self.MirrorDescanner.physicalFlybackTime.value = 25e-4  # Increase to see its effect in the profile better
+        dwell_times = [1.0e-6, 5.0e-6, 40.0e-6]
+        flybacks = [0, 1.0e-4, 1.0e-5]
 
-        x_descan_setpoints = self.MirrorDescanner.getXAcqSetpoints()
-        y_descan_setpoints = self.MirrorDescanner.getYAcqSetpoints()
+        fig, axs = plt.subplots(2, len(flybacks))
+        fig.tight_layout(pad=2.0)  # add some space between subplots so that the axes labels are not hidden
+        for idx, (dwell_time, flyback) in enumerate(zip(dwell_times, flybacks)):
+            self.EBeamScanner.dwellTime.value = dwell_time  # Increase dwell time to see steps in the profile better
+            self.MirrorDescanner.physicalFlybackTime.value = flyback  # Increase to see its effect in the profile better
 
-        fig, axs = plt.subplots(2)
-        fig.tight_layout(pad=3.0)  # add some space between subplots so that the axes labels are not hidden
-        axs[0].plot(x_descan_setpoints, "xb", markersize=0.5,
-                    label="x descan setpoints (scanning of one row within a cell image)")
-        axs[0].set_xlabel("overscanned cell image row plus flyback [us]")
-        axs[0].set_ylabel("x setpoints [bits]")
-        axs[1].plot(y_descan_setpoints[::], "or", markersize=0.5,
-                    label="y descan setpoints (scanning of one column within a cell image)")
-        axs[1].set_xlabel("overscanned cell image column [px]")
-        axs[1].set_ylabel("y setpoints [bits]")
-        axs[0].legend(loc="upper left")
-        axs[1].legend(loc="upper left")
+            x_descan_setpoints = self.MirrorDescanner.getXAcqSetpoints()
+            y_descan_setpoints = self.MirrorDescanner.getYAcqSetpoints()
+
+            axs[0][idx].plot(x_descan_setpoints, "o", color="C0", markersize=1)
+            axs[0][idx].set_xlabel("overscanned cell image row plus flyback [us]")
+            axs[0][idx].set_ylabel("x setpoints [bits]")
+            axs[0][idx].set_title(f"dwell time:{dwell_time}s, flyback:{flyback}s")
+            axs[1][idx].plot(y_descan_setpoints[::], "o", color="C1", markersize=1)
+            axs[1][idx].set_xlabel("overscanned cell image column [px]")
+            axs[1][idx].set_ylabel("y setpoints [bits]")
+            axs[1][idx].set_title(f"dwell time:{dwell_time}s, flyback:{flyback}s")
         plt.show()
 
     def test_getCalibrationSetpoints(self):
@@ -1246,36 +1248,43 @@ class TestMirrorDescanner(unittest.TestCase):
         # check that same number of setpoints in x in y
         self.assertEqual(len(x_descan_setpoints), len(y_descan_setpoints))
 
-    @unittest.skip  # for debugging only
+    # @unittest.skip  # for debugging only
     def test_plot_calibration_setpoints(self):
         """Plot the calibration descanner setpoint profiles.
         x descanner: sine
         y descanner: flat line
         """
-        self.EBeamScanner.dwellTime.value = 5e-6
-        self.MirrorDescanner.scanOffset.value = (0.1, 0.0)  # center of the sine on x; y flat line
-        self.MirrorDescanner.scanAmplitude.value = (0.5, 0.0)  # amplitude of the sine on x; y flat line
+        self.EBeamScanner.dwellTime.value = 5.e-06
+        self.MirrorDescanner.scanOffset.value = (0.1, 0.0)
+        self.MirrorDescanner.scanAmplitude.value = (0.5, 0.0)
+        self.EBeamScanner.scanOffset.value = (0.2, 0.1)
+        self.EBeamScanner.scanAmplitude.value = (0.4, 0.5)
 
         # Total line scan time is equal to period of the calibration signal, the frequency is the inverse
         total_line_scan_time = self.MPPC.getTotalLineScanTime()
-        # TODO Do we need the flyback included for calibration of the scan delay?
 
         x_descan_setpoints, y_descan_setpoints = self.MirrorDescanner.getCalibrationSetpoints(total_line_scan_time)
-
-        x_descan_setpoints = numpy.array(x_descan_setpoints)
-        y_descan_setpoints = numpy.array(y_descan_setpoints)
+        x_scan_setpoints, y_scan_setpoints, _ = self.EBeamScanner.getCalibrationSetpoints(total_line_scan_time)
 
         timestamps_descanner = numpy.arange(0, total_line_scan_time, self.MirrorDescanner.clockPeriod.value)
+        timestamps_scanner = numpy.arange(0, total_line_scan_time, total_line_scan_time / len(x_scan_setpoints))
 
-        fig, axs = plt.subplots(1)
-        axs.plot(timestamps_descanner, x_descan_setpoints, "ro", markersize=0.5,
-                    label="Descanner x setpoints")
-        axs.plot(timestamps_descanner, y_descan_setpoints, "bo", markersize=0.5,
-                    label="Descanner y setpoints")
-        axs.set_xlabel("scanning time [sec]")
-        axs.set_ylabel("setpoints [bits]")
+        fig, axs = plt.subplots(2)
+        fig.tight_layout(pad=3.0)  # add some space between subplots so that the axes labels are not hidden
+        axs[0].plot(timestamps_descanner, x_descan_setpoints, "o", markersize=2, label="X")
+        axs[0].plot(timestamps_descanner, y_descan_setpoints, "o", markersize=2, label="Y")
+        axs[0].set_xlabel("line scanning time [sec]")
+        axs[0].set_ylabel("setpoints [bits]")
+        axs[0].set_title("Calibration setpoints descanner")
 
-        axs.legend(loc="upper left")
+        axs[1].plot(timestamps_scanner, x_scan_setpoints, "o", markersize=2, label="X")
+        axs[1].plot(timestamps_scanner, y_scan_setpoints, "o", markersize=2, label="Y")
+        axs[1].set_xlabel("line scanning time [sec]")
+        axs[1].set_ylabel("setpoints [V]")
+        axs[1].set_title("Calibration setpoints scanner")
+
+        axs[0].legend(loc="upper left")
+        axs[1].legend(loc="upper left")
         plt.show()
 
 
