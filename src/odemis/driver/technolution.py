@@ -914,7 +914,7 @@ class MirrorDescanner(model.Emitter):
         # physical time for the mirror descanner to perform a flyback (moving back to start of a line scan)
         self.physicalFlybackTime = model.FloatContinuous(150e-6, range=(0, 1e-3), unit='s')
 
-    def getXAcqSetpoints(self):
+    def getXAcqSetpoints(self, factor=0.25):
         """
         Creates the setpoints for the descanner in x direction for de-scanning one row of pixels. The
         x setpoints describe the movement of the descanner during the scanning of one full row of pixels.
@@ -978,7 +978,10 @@ class MirrorDescanner(model.Emitter):
         # convert flyback setpoints into bits; should be at the same level as the start of the ramp (=offset)
         flyback_points = scan_start + numpy.zeros(number_flyback_points)  # [bits]
 
-        setpoints = numpy.concatenate((scanning_points, flyback_points))  # [bits]
+        slice_index = int(len(flyback_points) * factor)
+        setpoints = numpy.concatenate((flyback_points[:slice_index],
+                                       scanning_points,
+                                       flyback_points[slice_index:]))  # [bits]
 
         # Setpoints need to be integers when send to the ASM. First round down found setpoints to next integer
         # then convert to int type.
@@ -1028,7 +1031,7 @@ class MirrorDescanner(model.Emitter):
 
         return setpoints.tolist()
 
-    def getCalibrationSetpoints(self, total_line_scan_time):
+    def getCalibrationSetpoints(self, total_line_scan_time, phase=90):
         """
         Calculate the setpoints for the descanner during calibration mode. The setpoints resemble a sine shape
         in x and a flat line at zero in y.
@@ -1068,8 +1071,9 @@ class MirrorDescanner(model.Emitter):
         #     *      *           *
         #       *  *
         #
-        # [bits + bits * sec / sec = bits]
-        x_setpoints = offset[0] + amplitude[0] * numpy.sin(2 * math.pi * calibration_frequency * timestamps_setpoints)
+        x_setpoints = offset[0] + amplitude[0] * numpy.sin(
+            2 * math.pi * calibration_frequency * timestamps_setpoints + math.radians(phase)
+        )  # [bits + bits * (1 / sec) * sec = bits]
 
         # setpoints in y direction are constant (=0)
         y_setpoints = 0 * timestamps_setpoints  # [bits]
@@ -1082,7 +1086,7 @@ class MirrorDescanner(model.Emitter):
         y_setpoints = numpy.floor(y_setpoints).astype(int)  # [bits]
 
         # mapping from a.u. to bits is symmetrically around 0, whereas the range in bits that is accepted by the ASM is
-        # not symetrically around 0 ([-32768, 32767]). Clip 2**15 = 32768 by one bit to 32767 bit.
+        # not symmetrically around 0 ([-32768, 32767]). Clip 2**15 = 32768 by one bit to 32767 bit.
         x_setpoints = numpy.minimum(x_setpoints, I16_SYM_RANGE[1] - 1)
         y_setpoints = numpy.minimum(y_setpoints, I16_SYM_RANGE[1] - 1)
 
