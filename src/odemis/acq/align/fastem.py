@@ -174,6 +174,7 @@ class CalibrationTask(object):
 
         self.calibrations = calibrations
         self.stage_pos = stage_pos
+        self._calib_runner = None  # instance of specific calibration class
 
         # List of calibrations to be executed. Used for progress update.
         self._calibrations_remaining = set(calibrations)
@@ -240,9 +241,9 @@ class CalibrationTask(object):
             for calib in self.calibrations:
                 calib_cls = calib.value
                 logging.debug("Starting calibration %s", calib_cls.__name__)
-                calib_runner = calib_cls(components)
+                self._calib_runner = calib_cls(components)
                 # TODO return a sub-future when implemented for calibrations
-                self.run_calibration(calib_runner)
+                self.run_calibration(self._calib_runner)
 
                 # def _pass_future_progress(sub_f, start, end):
                 #     f.set_progress(start, end)
@@ -303,7 +304,7 @@ class CalibrationTask(object):
         :return: (bool) True if cancelled.
         """
         self._cancelled = True
-
+        self._calib_runner.cancel()
         # FIXME Currently there is no subfuture implemented for each calibration.
         #  So, when cancelling while a calibration has already started it will run until it is completely finished.
 

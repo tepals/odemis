@@ -434,6 +434,7 @@ def _DoBinaryFocus(future, detector, emt, focus, dfbkg, good_focus, rng_focus):
                 best_pos = pos_range[i_max]
 
             if future._autofocus_state == CANCELLED:
+                logging.info("autofocus cancelled")
                 raise CancelledError()
 
             if left == right:
