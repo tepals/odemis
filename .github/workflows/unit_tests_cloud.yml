@@ -35,6 +35,9 @@ jobs:
         sudo chmod a+rw /var/run/odemisd
 
         python3 setup.py build_ext --inplace
+    - name: pip3 list
+      run: |
+        pip3 list
 
     - name: Run tests from odemis.dataio
       run: |
