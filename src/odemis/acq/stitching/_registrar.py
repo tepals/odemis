@@ -33,11 +33,19 @@ import math
 from collections import deque
 
 import numpy
+import scipy.spatial
+from odemis.util import transform
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import minimum_spanning_tree
 
 from odemis import model
 from odemis.acq.drift import MeasureShift
+from odemis.util.graph import (
+    SkewSymmetricAdjacencyGraph,
+    depth_first_walk,
+    maximum_spanning_tree,
+)
+from odemis.util.registration import WeightedShift, Orientation, register_translation
 
 GOOD_MATCH = 0.9  # consider all registrations with match > GOOD_MATCH
 LEFT_TO_RIGHT = 1
@@ -225,6 +233,7 @@ class ShiftRegistrar(object):
             self.ovrlp = abs(size_meter - diff) / size_meter
 
             self.osize = self.size[1] * self.ovrlp  # overlap size in pixels
+        return self.pos_x, self.pos_y
 
     def _find_closest_tile(self, pos):
         """ finds the tile in the grid that is closest to pos.
@@ -757,3 +766,181 @@ class GlobalShiftRegistrar(ShiftRegistrar):
                         idx_queue.append(next_idx)
 
         return positions
+
+
+class GraphOptimizationRegistrar(ShiftRegistrar):
+    def __init__(self, n_rows, n_cols):
+        super().__init__()
+
+        self.shifts_hor = None
+        self.shifts_ver = None
+        self.tiles = []
+        # Calculated position of each tile relative to the upper left (first) tile in pixels as a 3D array of floats
+        self.registered_positions_px = None  # 3D array of calculated shifts in px
+        self.n_rows = n_rows
+        self.n_cols = n_cols
+        self.graph = SkewSymmetricAdjacencyGraph(n_rows * n_cols)
+        self.coordinates = []
+
+    def addTile(self, tile, dependent_tiles=None, row=None, col=None):
+        """
+        Extends grid by one tile. The first tile is added at the top left position. Any following
+        tile must have a neighbour (on either side left, right, top, bottom) that has previously
+        been added.
+
+        :param tile: (DataArray of shape YX) tile with MD_POS and MD_PIXEL_SIZE metadata.
+        :param dependent_tiles: (list of K numpy.arrays or None): dependent tiles with fixed position
+        :param row: (int): row of tile in grid
+        :param col: (int): col of tile in grid
+        relative to main tile. Their content and metadata are not used for the computation of the final position.
+        """
+        if row is None and col is None:
+            idx, neighbors = self._insert_tile_to_grid(tile)
+        elif not all([row, col]):
+            raise ValueError(f"Row and col must both have a value or both be None, not row: {row}, col: {col}")
+        else:
+            neighbors = self._get_neighboring_tiles(row, col)
+            idx = self._to_idx(row, col)
+        self._compute_registration(tile, idx, neighbors)
+
+        if dependent_tiles is not None:
+            offsets = []
+            for dt in dependent_tiles:
+                offsets.append(numpy.subtract(dt.metadata[model.MD_POS], tile.metadata[model.MD_POS]))
+            self.shift_tile_dep_tiles.append(offsets)
+
+    def getPositions(self):
+        # solve for positions
+        positions_px = numpy.zeros((self.n_rows * self.n_cols, 2), dtype=numpy.int_)
+        positions_m = numpy.zeros((self.n_rows * self.n_cols, 2), dtype=numpy.float_)
+        positions_m[0, :] = self.tiles[0].metadata[model.MD_POS]
+        first_pos = transform.to_physical_space(positions_px[0],
+                                                self.tiles[0].shape,
+                                                self.tiles[0].metadata[model.MD_PIXEL_SIZE])
+        mst = maximum_spanning_tree(self.graph)
+        walker = depth_first_walk(mst, 0)
+        next(walker)  # skip first `(None, start)` entry
+        px_size = self.tiles[0].metadata[model.MD_PIXEL_SIZE]
+        for predecessor, vertex in walker:
+            shift = mst.get_edge_weight((predecessor, vertex)).shift
+            positions_px[vertex] = positions_px[predecessor] - shift  # registered_position_px
+            # convert to position in meters
+            # positions_px[vertex] = positions_px[predecessor] + numpy.array(self.tiles[0].shape) + shift
+            pos_vertex = (positions_m[predecessor][0] - shift[1] * px_size[1],
+                          positions_m[predecessor][1] + shift[0] * px_size[0])
+            positions_m[vertex] = pos_vertex
+        return positions_m, positions_px
+
+    def getPositions1(self):
+        # solve for positions
+        positions_px = numpy.zeros((self.n_rows * self.n_cols, 2), dtype=numpy.int_)
+        positions_m = numpy.zeros((self.n_rows * self.n_cols, 2), dtype=numpy.float_)
+        positions_m[0, :] = self.tiles[0].metadata[model.MD_POS]
+        first_pos = transform.to_physical_space(positions_px[0],
+                                                self.tiles[0].shape,
+                                                self.tiles[0].metadata[model.MD_PIXEL_SIZE])
+        mst = maximum_spanning_tree(self.graph)
+        walker = depth_first_walk(mst, 0)
+        next(walker)  # skip first `(None, start)` entry
+        for predecessor, vertex in walker:
+            shift = mst.get_edge_weight((predecessor, vertex)).shift
+            shift = (-shift[0], shift[1])
+            positions_px[vertex] = positions_px[predecessor] + shift  # registered_position_px
+            # convert to position in meters
+            # positions_px[vertex] = positions_px[predecessor] + numpy.array(self.tiles[0].shape) + shift
+            shift_m = transform.to_physical_space(shift,
+                                                  self.tiles[0].shape,
+                                                  self.tiles[0].metadata[model.MD_PIXEL_SIZE])
+            positions_m[vertex] = positions_m[predecessor] + (first_pos - shift_m)
+        return positions_m, positions_px
+
+    def _to_idx(self, row, col):
+        """
+        Top left tile is idx 0, counting row by row
+        :param row: (int)
+        :param col: (int)
+        :return: (int)
+        """
+        #    0 1 2 3
+        # 0: 0 1 2 3
+        # 1: 4 5 6 7
+        # 2: 8 9
+        # (2, 1) => 2 * 4 + 1 = 9
+        return row * self.n_cols + col
+
+    def _to_row_col(self, idx):
+        """
+        Top left tile is idx 0, counting row by row
+        :param idx: (int)
+        :return: (int, int)
+        """
+        #    0 1 2 3
+        # 0: 0 1 2 3
+        # 1: 4 5 6 7
+        # 2: 8 9
+        # idx 9 => row: int(9 / 4) = 2
+        #          col: 9 % 4 = 1
+        row = int(idx / self.n_cols)
+        col = idx % self.n_cols
+        return row, col
+
+    def _insert_tile_to_grid(self, tile):
+        """
+
+        :param tile:
+        :return: index of current tile, and the indices of the neigboring tiles
+        """
+        self.coordinates.append(tile.metadata[model.MD_POS])
+        if not self.tiles:
+            return 0, {}
+        if len(self.coordinates) == 2:
+            dx = abs(self.coordinates[0][0] - self.coordinates[1][0])
+            dy = abs(self.coordinates[0][1] - self.coordinates[1][1])
+            self.exp_dist = dx if dx > dy else dy
+
+        # Find the closest 4 neighbors (excluding itself) for each point.
+        tree = scipy.spatial.cKDTree(self.coordinates)
+        # NOTE: Starting SciPy v1.6.0 the `n_jobs` argument will be renamed `workers`
+        # return 3 nearest neighbors (self, horizontal & vertical)
+        distances, indices = tree.query(self.coordinates, k=3, n_jobs=-1)
+        if distances[-1][-1] > self.exp_dist * 1.05:
+            # distances sorted from shortest to highest, if distances[1] > exp_dist than it is not a neighbor
+            # distances = distances[:, :-1]
+            indices = indices[:, :-1]
+
+        current_idx = indices[-1][0]
+        neighbors = {}
+        for i in indices[-1][1:]:  # exclude the first closest neigbor, because that is self
+            dist_x = abs(self.coordinates[i][0] - self.coordinates[-1][0])
+            dist_y = abs(self.coordinates[i][1] - self.coordinates[-1][1])
+            if dist_x > dist_y:
+                neighbors[i] = Orientation.LEFT_TO_RIGHT
+            else:
+                neighbors[i] = Orientation.TOP_TO_BOTTOM
+        return current_idx, neighbors
+
+    def _compute_registration(self, tile, idx, neighbors):
+        # add tile to list of tiles
+        self.tiles.append(tile)
+        for n_idx, n_orientation in neighbors.items():
+            # r, c = self._to_row_col(n_idx)
+            src = self.tiles[n_idx]
+            ncc, shift = register_translation(src, tile, n_orientation)
+            self.graph.add_edge((idx, n_idx), WeightedShift(ncc, shift))
+
+    def _get_neighboring_tiles(self, row, col):
+        """
+        returns the known neighbors of the tile at position (row, col).
+        :param row:
+        :param col:
+        :return: list of tiles
+        """
+        neighbor_indices = {}
+        idx = self._to_idx(row, col - 1)
+        if self.tiles[idx] is not None:
+            neighbor_indices[idx] = Orientation.LEFT_TO_RIGHT
+
+        idx = self._to_idx(row - 1, col)
+        if self.tiles[idx] is not None:
+            neighbor_indices[idx] = Orientation.TOP_TO_BOTTOM
+        return neighbor_indices

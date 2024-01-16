@@ -17,8 +17,9 @@ You should have received a copy of the GNU General Public License along with Ode
 import copy
 from odemis import model
 from odemis.acq.stitching._constants import REGISTER_GLOBAL_SHIFT, REGISTER_SHIFT, \
-    REGISTER_IDENTITY, WEAVER_MEAN, WEAVER_COLLAGE, WEAVER_COLLAGE_REVERSE
-from odemis.acq.stitching._registrar import ShiftRegistrar, IdentityRegistrar, GlobalShiftRegistrar
+    REGISTER_IDENTITY, WEAVER_MEAN, WEAVER_COLLAGE, WEAVER_COLLAGE_REVERSE, REGISTER_GRAPH
+from odemis.acq.stitching._registrar import ShiftRegistrar, IdentityRegistrar, GlobalShiftRegistrar, \
+    GraphOptimizationRegistrar
 from odemis.acq.stitching._weaver import MeanWeaver, CollageWeaver, CollageWeaverReverse
 
 
@@ -39,6 +40,8 @@ def register(tiles, method=REGISTER_GLOBAL_SHIFT):
         registrar = IdentityRegistrar()
     elif method == REGISTER_GLOBAL_SHIFT:
         registrar = GlobalShiftRegistrar()
+    elif method == REGISTER_GRAPH:
+        registrar = GraphOptimizationRegistrar(n_rows=1, n_cols=2)
     else:
         raise ValueError("Invalid registrar %s" % (method,))
 

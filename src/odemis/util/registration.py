@@ -22,11 +22,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 USA.
 
 """
+import logging
 import math
 from typing import Iterator, NamedTuple, Optional, Tuple, Type, TypeVar
 
 import numpy
 import scipy.spatial
+
 from odemis.util.cluster import kmeans2
 from odemis.util.graph import (
     SkewSymmetricAdjacencyGraph,
@@ -569,3 +571,333 @@ def estimate_grid_orientation_from_img(
         num_spots = None
     ji = find_spot_positions(image, sigma, threshold_abs, threshold_rel, num_spots)
     return estimate_grid_orientation(ji, shape, transform_type)
+
+import itertools
+from typing import Callable, Tuple
+
+import numpy
+# from numpy.typing import NDArray
+
+from odemis.util.numpydict import NumpyDict
+
+# Shift = NDArray[numpy.int_]
+
+
+class _Any(int):
+    """Compares equal to everything"""
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+
+class _None(int):
+    """Compares not equal to everything"""
+
+    def __eq__(self, other: object) -> bool:
+        return False
+
+
+class Orientation:
+    """
+    Constants to define how two images are positioned relative to each other.
+
+    """
+    ANY = _Any()
+    NONE = _None()
+    LEFT_TO_RIGHT = -1
+    TOP_TO_BOTTOM = -2
+
+
+def phase_correlation_matrix(
+    src, dst
+):
+    """
+    Computes the phase correlation matrix between two images.
+
+    The value of the phase correlation matrix at index `[j, i]` can be
+    interpreted as the likelyhood that the two images, when offset by `j`
+    pixels vertically and `i` pixels horizontally, form a single scene.
+
+    Parameters
+    ----------
+    src : numpy.ndarray
+        Reference image.
+    dst : numpy.ndarray
+        Image to register; must be of same shape as `src`.
+
+    Returns
+    -------
+    phase_correlation : numpy.ndarray
+        The phase correlation matrix; has the same shape as both input images.
+
+    """
+    # images must be the same shape
+    if src.shape != dst.shape:
+        raise ValueError("Error: images must be of same size")
+
+    src_freq = numpy.fft.rfftn(src)
+    dst_freq = numpy.fft.rfftn(dst)
+    cross_spectral_density = src_freq * dst_freq.conj()
+    normalization = numpy.abs(cross_spectral_density)
+    normalization[normalization == 0.0] += numpy.finfo(float).eps
+    cross_spectral_density /= normalization
+    phase_correlation = numpy.fft.irfftn(cross_spectral_density)
+    return phase_correlation
+
+
+def _unwrapper(orientation: int) -> Callable[[int, int, int], Tuple[int, ...]]:
+    """
+    Due to the periodic nature of the DFT, each maximum in the phase
+    correlation matrix can correspond up to `2 * ndim` shifts. For example,
+    given an image of shape `(n, m)`, a maximum in the phase correlation matrix
+    at `(j, i)` could correspond to one of the following shifts: `(j, i)`,
+    `(j - n, i)`, `(j, i - m)`, or `(j - n, i - m)`.
+
+    This closure returns a helper function that unwraps an index into one of
+    the axes of the phase correlation matrix.
+
+    Parameters
+    ----------
+    orientation : int
+        Defines how the two input images are positioned relative to each other.
+        If the axis is equal to the given orientation, the index will be fully
+        unwrapped. Otherwise the shift is constrained along the given axis to
+        half the axis size.
+
+    Returns
+    -------
+    func : Callable
+        See docstring below.
+
+    """
+
+    def func(j: int, axis: int, axis_size: int) -> Tuple[int, ...]:
+        """
+        Returns the unwrapped indices of a single axis of the phase correlation
+        matrix.
+
+        Parameters
+        ----------
+        j : int
+            The index to unwrap.
+        axis : int
+            The axis on which the index is unwrapped.
+        axis_size : int
+            The size of the axis. Must be equal to `array.shape[axis]`.
+
+        Returns
+        -------
+        out : Tuple[int, ...]
+            The unwrapped indices.
+
+        """
+        if orientation == axis:
+            return (j, j - axis_size) if j else (j,)
+        midpoint = axis_size // 2
+        return (j - axis_size,) if j > midpoint else (j,)
+
+    return func
+
+
+def possible_shifts(
+    pcm, n: int, orientation: int
+):
+    """
+    Find multiple discrete peaks within the phase correlation matrix.
+
+    The set of peaks multi_peak_max finds is defined as the highest `n` phase
+    correlation matrix values.
+
+    Parameters
+    ----------
+    pcm : numpy.ndarray
+        The phase correlation matrix.
+    n : int
+        The number of peaks to find.
+    orientation : Orientation
+        Defines how the two input images are positioned relative to each other.
+        If the axis is equal to the given orientation, the index will be fully
+        unwrapped. Otherwise the shift is constrained along the given axis to
+        half the axis size.
+
+    Returns
+    -------
+    maxima : shifts iterator
+        Each a maximum in the phase correlation matrix containing `(dj, di)`.
+
+    """
+    ndim = pcm.ndim
+    shape = pcm.shape
+    a = pcm.ravel()
+    idx = numpy.argpartition(a, -n)[-n:]
+    maxima = [numpy.unravel_index(x, shape) for x in idx]
+    logging.debug("Found `maxima = %s` in phase correlation matrix", maxima)
+
+    func = _unwrapper(orientation)
+    for maximum in maxima:
+        unwrap = map(func, maximum, range(-ndim, 0), shape)
+        yield from map(numpy.array, itertools.product(*unwrap))
+
+
+def normalized_cross_correlation(
+    a, b
+) -> float:
+    """
+    Returns the normalized cross correlation coefficient factor relating
+    their similarity.
+
+    Parameters
+    ----------
+    a : numpy.ndarray
+        Image.
+    b : numpy.ndarray
+        Image.
+
+    Returns
+    -------
+    ncc : float
+        The normalized cross correlation coefficient, `-1 <= ncc <= 1`.
+
+    """
+    # TODO: Consider implementing Fast Normalized Cross-Correlation method by
+    # J.P. Lewis to improve speed.
+
+    # subtract mean
+    a = a - numpy.mean(a)
+    b = b - numpy.mean(b)
+
+    ncc: float = numpy.sum(a * b) / numpy.sqrt(numpy.sum(a * a) * numpy.sum(b * b))
+    return ncc
+
+
+def extract_overlap_subregion(
+    image, shift
+):
+    """
+    Returns the subregion implied if you take a sliding window the size of the
+    image and translate it by `shift` pixels.
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        Input image.
+    shift : Shift
+        pixel shifts
+
+    Returns
+    -------
+    subregion : numpy.ndarray
+
+    """
+    if any(abs(dj) >= axis_size for dj, axis_size in zip(shift, image.shape)):
+        raise ValueError("Index out of bounds")
+
+    w = tuple(slice(None, dj) if (dj < 0) else slice(dj, None) for dj in shift)
+    subregion = image[w]
+    return subregion
+
+
+class ShiftEvaluator:
+    """
+    Provides a cached wrapper for `normalized_cross_correlation()` to simplify
+    multiple calls given two images and varying shifts.
+
+    """
+
+    def __init__(self, src, dst) -> None:
+        """
+        Initializes a `ShiftEvaluator`.
+
+        Parameters
+        ----------
+        src : numpy.ndarray
+            Image.
+        dst : numpy.ndarray
+            Image.
+
+        """
+        self.cache = NumpyDict()
+        self.src = src
+        self.dst = dst
+
+    def _eval(self, shift) -> float:
+        sub1 = extract_overlap_subregion(self.src, shift)
+        sub2 = extract_overlap_subregion(self.dst, -shift)
+        ncc = normalized_cross_correlation(sub1, sub2)
+        logging.debug("Evaluated `shift = %r` with `ncc = %f`", shift, ncc)
+        return ncc
+
+    def eval(self, shift) -> float:
+        """
+        Returns the normalized cross correlation coefficient factor relating
+        the similarity of the two images for a given shift.
+
+        Parameters
+        ----------
+        shift : Shift
+            pixel shifts
+
+        Returns
+        -------
+        ncc : float
+            The normalized cross correlation coefficient, `-1 <= ncc <= 1`.
+
+        """
+        try:
+            return self.cache[shift]
+        except KeyError:
+            ncc = self._eval(shift)
+            self.cache[shift] = ncc
+            return ncc
+
+
+def register_translation(
+    src, dst, orientation: int = Orientation.ANY
+):
+    """
+    The value of the phase cross correlation matrix at index `[j, i]` can be
+    interpreted as the likelihood that the two images, when offset by `j`
+    pixels vertically and `i` pixels horizontally, form a single scene.
+
+    Parameters
+    ----------
+    src : numpy.ndarray
+        Reference image.
+    dst : numpy.ndarray
+        Image to register; must be of same shape as `src`.
+    orientation : Orientation
+        Defines how the two input images are positioned relative to each other.
+        If the axis is equal to the given orientation, the index will be fully
+        unwrapped. Otherwise the shift is constrained along the given axis to
+        half the axis size.
+
+    Returns
+    -------
+    ncc : float
+        The normalized cross coefficient evaluated at the determined shift.
+    shift : Shift
+        pixel shifts
+
+    """
+    pcm = phase_correlation_matrix(src, dst)
+    evaluator = ShiftEvaluator(src, dst)
+    shift = max(possible_shifts(pcm, 3, orientation), key=evaluator.eval)
+
+    # ncc hill climbing
+    n = src.ndim
+    delta = numpy.zeros((2 * n + 1, n), dtype=numpy.int_)
+    delta[1::2].flat[::n + 1] = 1
+    delta[2::2].flat[::n + 1] = -1
+
+    while True:
+        _shift = shift.copy()
+        # TODO: include checking of bounds / shift out of range
+        shift = max(shift + delta, key=evaluator.eval)
+        if numpy.array_equal(_shift, shift):
+            break
+
+    ncc = evaluator.eval(shift)
+    logging.debug("Selected `shift = %r` with `ncc = %f`", shift, ncc)
+
+    return ncc, shift
+

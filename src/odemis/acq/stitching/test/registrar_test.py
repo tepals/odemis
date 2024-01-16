@@ -32,10 +32,13 @@ import warnings
 import numpy
 
 import odemis
-from odemis import model
-from odemis.acq.stitching import IdentityRegistrar, ShiftRegistrar, GlobalShiftRegistrar
+from odemis import model, dataio
+from odemis.acq.stitching import IdentityRegistrar, ShiftRegistrar, GlobalShiftRegistrar, GraphOptimizationRegistrar, \
+    register, REGISTER_GLOBAL_SHIFT, weave, WEAVER_COLLAGE, WEAVER_MEAN
+from odemis.acq.stitching._constants import REGISTER_GRAPH
 from odemis.acq.stitching.test.stitching_test import decompose_image
 from odemis.dataio import find_fittest_converter
+from odemis.model import DataArray
 from odemis.util import testing
 from odemis.util.img import ensure2DImage
 
@@ -619,7 +622,7 @@ class TestGlobalShiftRegistrar(unittest.TestCase):
         shifts = [(0, 0), (10, 10), (0, 10), (8, 5), (6, -5)]
         img_sizes = [(500, 500), (300, 400), (500, 200)]
         dtypes = [numpy.int8, numpy.int16]
-        px_size = (1e-6, 1e-6)
+        px_size = (1, 1)
 
         for shift in shifts:
             for img_size in img_sizes:
@@ -670,11 +673,30 @@ class TestGlobalShiftRegistrar(unittest.TestCase):
 
                     tiles = [model.DataArray(tile1, md1),
                              model.DataArray(tile2, md2)]
+                    registrar = GraphOptimizationRegistrar(n_rows=1, n_cols=2)
+                    for t in tiles:
+                        registrar.addTile(t)
+
+                    tile_positions, tile_pos_px = registrar.getPositions()
                     registrar = GlobalShiftRegistrar()
                     for t in tiles:
                         registrar.addTile(t)
 
-                    tile_positions, _ = registrar.getPositions()
+                    tile_positions2, tile_pos_px = registrar.getPositions()
+                    upd_tiles = register(tiles, method=REGISTER_GRAPH)
+                    outd = weave(upd_tiles, WEAVER_MEAN)
+                    idx = "stitched"
+                    file_path = f"/home/pals/Documents/FAST-EM/stitching-test/test{idx}.tiff"
+                    dataio.tiff.export(file_path, outd)
+                    file_path = f"/home/pals/Documents/FAST-EM/stitching-test/tile-{0}.tiff"
+                    dataio.tiff.export(file_path, tiles[0])
+                    file_path = f"/home/pals/Documents/FAST-EM/stitching-test/tile-{1}.tiff"
+                    dataio.tiff.export(file_path, tiles[1])
+                    file_path = f"/home/pals/Documents/FAST-EM/stitching-test/full-image.tiff"
+                    dataio.tiff.export(file_path, DataArray(img))
+                    print(shift, img_size)
+                    print(tile_positions2)
+                    print(tile_positions)
                     # test the positions of the first tile
                     self.assertAlmostEqual(tile_positions[0][0], md1[model.MD_POS][0])
                     self.assertAlmostEqual(tile_positions[0][1], md1[model.MD_POS][1])
@@ -717,7 +739,7 @@ class TestGlobalShiftRegistrar(unittest.TestCase):
         tiles = [model.DataArray(tile1, md1), model.DataArray(tile2, md2),
                  model.DataArray(tile3, md3), model.DataArray(tile4, md4)]
 
-        registrar = GlobalShiftRegistrar()
+        registrar = GraphOptimizationRegistrar(n_rows=2, n_cols=2)
         for i in range(len(tiles)):
             registrar.addTile(tiles[i])
 
