@@ -1223,7 +1223,8 @@ class PMDSimulator(object):
 
     def move(self, steps, target_pos):
         # simple move, same duration for every length, don't care about speed
-        self.executor.submit(self._do_move, steps, target_pos)
+        f = self.executor.submit(self._do_move, steps, target_pos)
+        f.result(timeout=900)
 
     def find_index(self):
         t = Thread(target=self._do_indexing)
@@ -1242,8 +1243,8 @@ class PMDSimulator(object):
         dur /= 2
         while time.time() < startt + dur:
             if not self.is_moving:  # stopped
-                return
+                break
             else:
                 time.sleep(0.1)
-        self.current_pos = copy.deepcopy(target_pos)
+        self.current_pos = target_pos.copy()
         self.is_moving = False
