@@ -866,6 +866,7 @@ class MirrorDescanner(model.Emitter):
         # heights of the sawtooth descanner signal (it does not include the offset!)
         self.scanAmplitude = model.TupleContinuous((0.008, 0.008), range=((-1, -1), (1, 1)), cls=(int, float))
         # FIXME add a check that offset + amplitude >! 2**15 - 1 and offset + amplitude <! -2**15
+        self.shift = model.IntContinuous(0, range=(0, 1000))
 
         clockFrequencyData = self.parent.asmApiGetCall("/scan/descan_control_frequency", 200)  # [1/sec]
         # period (=1/frequency) of the descanner in seconds; update frequency for setpoints upload
@@ -902,7 +903,7 @@ class MirrorDescanner(model.Emitter):
         # Convert amplitude of the scanning ramp from [a.u.] to [bits].
         scan_amplitude = convertRange(self.scanAmplitude.value[0],
                                       numpy.array(self.scanAmplitude.range)[:, 1],
-                                      I16_SYM_RANGE)  # [bits]
+                                      I16_SYM_RANGE) * 1.0 # [bits]
         # Convert the end of the scanning ramp from [a.u.] to [bits].
         scan_end = convertRange(self.scanOffset.value[0] + self.scanAmplitude.value[0],
                                 numpy.array(self.scanAmplitude.range)[:, 1], I16_SYM_RANGE)  # [bits]
@@ -930,15 +931,19 @@ class MirrorDescanner(model.Emitter):
         if not almost_equal(remainder_scanning_time, 0, rtol=0, atol=1e-10):
             # add one setpoint with value same as end of scanning ramp
             scanning_points = numpy.hstack((scanning_points, scan_end))  # [bits]
-
-        # Calculation of the flyback points:
-        # Check if the physical flyback time (time the mirror needs to move back to the start position
-        # of the line scan) is a whole multiple of the descan period. If not, round up.
+        # Calculate the number of flyback points based on the physical flyback time and descanner period
         number_flyback_points = math.ceil(self.physicalFlybackTime.value / descan_period)  # [sec/sec = no unit]
-        # convert flyback setpoints into bits; should be at the same level as the start of the ramp (=offset)
-        flyback_points = scan_start + numpy.zeros(number_flyback_points)  # [bits]
 
-        setpoints = numpy.concatenate((scanning_points, flyback_points))  # [bits]
+        # For the initial part of the flyback period the descanner moves back to the start of the scanning ramp.
+        flyback_points = numpy.linspace(scan_amplitude + scan_start - 1,
+                                        scan_start,
+                                        math.ceil(number_flyback_points * 0.9))  # [bits]
+
+        # Create a flat line for the remaining part of the flyback period
+        flat_line = scan_start + numpy.zeros(math.floor(number_flyback_points * 0.1))  # [bits]
+
+        # Combine the scanning points with the flyback points to form the final setpoints list.
+        setpoints = numpy.concatenate((scanning_points, flyback_points, flat_line))  # [bits]
 
         # Setpoints need to be integers when send to the ASM. First round down found setpoints to next integer
         # then convert to int type.
@@ -947,9 +952,10 @@ class MirrorDescanner(model.Emitter):
         setpoints = numpy.floor(setpoints).astype(int)  # [bits]
 
         # Mapping from a.u. to bits is symmetrically around 0, whereas the range in bits that is accepted by the ASM is
-        # not symetrically around 0 ([-32768, 32767]). Clip 2**15 = 32768 by one bit to 32767 bit.
+        # not symmetrically around 0 ([-32768, 32767]). Clip 2**15 = 32768 by one bit to 32767 bit.
         setpoints = numpy.minimum(setpoints, I16_SYM_RANGE[1] - 1)
 
+        setpoints = numpy.roll(setpoints, self.shift.value)
         return setpoints.tolist()
 
     def getYAcqSetpoints(self):
