@@ -1155,32 +1155,35 @@ class TestMirrorDescanner(unittest.TestCase):
         self.mirror_descanner.scanOffset.value = (0.1, 0.1)  # Increase to see its effect in the profile better
 
         x_scan_setpoints = self.mirror_descanner.getXAcqSetpoints()
-        self.mirror_descanner.shift.value = 0
-        x_descan_setpoints = self.mirror_descanner.getXAcqSetpoints()
-        y_descan_setpoints = self.mirror_descanner.getYAcqSetpoints()
-
-        x_scan_setpoints = numpy.concatenate((x_scan_setpoints, x_scan_setpoints))
-        x_descan_setpoints = numpy.concatenate((x_descan_setpoints, x_descan_setpoints))
-        y_descan_setpoints = numpy.concatenate((y_descan_setpoints, y_descan_setpoints))
-
         fig, axs = plt.subplots()
         fig.tight_layout(pad=3.0)  # add some space between subplots so that the axes labels are not hidden
-        # x_descan_setpoints = numpy.roll(x_descan_setpoints, 100)
-        axs.plot(x_scan_setpoints[::8], linewidth=3,
-                    label="x scan setpoints")
-        axs.plot(x_descan_setpoints[::8], "o", markersize=3, label="x descan setpoints")
-        # for i in range(5):
-        #     x_descan_setpoints = numpy.roll(x_descan_setpoints, 100)
-        #     axs.plot(x_descan_setpoints[::8], "o", markersize=3,)
-            # label="x descan setpoints (scanning of one row within a cell image)")
-        # axs[0].set_xlabel("overscanned cell image row plus flyback [us]")
-        # axs[0].set_ylabel("x setpoints [bits]")
-        # axs[1].plot(y_descan_setpoints[::], "o", color="C1", markersize=1,
-        #             label="y descan setpoints (scanning of one column within a cell image)")
-        # axs[1].set_xlabel("overscanned cell image column [px]")
-        # axs[1].set_ylabel("y setpoints [bits]")
-        axs.legend(loc="upper left")
-        # axs[1].legend(loc="upper left")
+        # for shift in [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550]:
+        for shift in [0, 350]:
+            self.mirror_descanner.shift.value = shift
+            x_descan_setpoints = self.mirror_descanner.getXAcqSetpoints()
+            y_descan_setpoints = self.mirror_descanner.getYAcqSetpoints()
+
+            # x_scan_setpoints = numpy.concatenate((x_scan_setpoints, x_scan_setpoints))
+            # x_descan_setpoints = numpy.concatenate((x_descan_setpoints, x_descan_setpoints))
+            # y_descan_setpoints = numpy.concatenate((y_descan_setpoints, y_descan_setpoints))
+
+
+            # x_descan_setpoints = numpy.roll(x_descan_setpoints, 100)
+            axs.plot(x_scan_setpoints[::8], linewidth=3, color="tab:blue",
+                        label="x scan setpoints")
+            axs.plot(x_descan_setpoints[::8], "o", markersize=3, label="x descan setpoints")
+            # for i in range(5):
+            #     x_descan_setpoints = numpy.roll(x_descan_setpoints, 100)
+            #     axs.plot(x_descan_setpoints[::8], "o", markersize=3,)
+                # label="x descan setpoints (scanning of one row within a cell image)")
+            # axs[0].set_xlabel("overscanned cell image row plus flyback [us]")
+            # axs[0].set_ylabel("x setpoints [bits]")
+            # axs[1].plot(y_descan_setpoints[::], "o", color="C1", markersize=1,
+            #             label="y descan setpoints (scanning of one column within a cell image)")
+            # axs[1].set_xlabel("overscanned cell image column [px]")
+            # axs[1].set_ylabel("y setpoints [bits]")
+            axs.legend(loc="upper left")
+            # axs[1].legend(loc="upper left")
         plt.show()
 
     def test_get_calibration_setpoints(self):

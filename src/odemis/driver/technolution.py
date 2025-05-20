@@ -866,7 +866,7 @@ class MirrorDescanner(model.Emitter):
         # heights of the sawtooth descanner signal (it does not include the offset!)
         self.scanAmplitude = model.TupleContinuous((0.008, 0.008), range=((-1, -1), (1, 1)), cls=(int, float))
         # FIXME add a check that offset + amplitude >! 2**15 - 1 and offset + amplitude <! -2**15
-        self.shift = model.IntContinuous(0, range=(0, 1000))
+        self.shift = model.FloatContinuous(0, range=(0.0, 1.0))
 
         clockFrequencyData = self.parent.asmApiGetCall("/scan/descan_control_frequency", 200)  # [1/sec]
         # period (=1/frequency) of the descanner in seconds; update frequency for setpoints upload
@@ -955,7 +955,7 @@ class MirrorDescanner(model.Emitter):
         # not symmetrically around 0 ([-32768, 32767]). Clip 2**15 = 32768 by one bit to 32767 bit.
         setpoints = numpy.minimum(setpoints, I16_SYM_RANGE[1] - 1)
 
-        setpoints = numpy.roll(setpoints, self.shift.value)
+        setpoints = numpy.roll(setpoints, round(len(setpoints) * self.shift.value))
         return setpoints.tolist()
 
     def getYAcqSetpoints(self):
