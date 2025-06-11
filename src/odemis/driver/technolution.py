@@ -182,7 +182,9 @@ class AcquisitionServer(model.HwComponent):
         except Exception:
             raise ValueError("Required child MirrorDescanner not provided")
         self._mirror_descanner = MirrorDescanner(parent=self, daemon=kwargs.get("daemon"), **ckwargs)
+        logging.info("Mirror descanner metadata is %s", self._mirror_descanner._metadata)
         self.children.value.add(self._mirror_descanner)
+        self._ebeam_scanner.dwellTime.subscribe(self._mirror_descanner._updateShift, init=False)
 
         try:
             ckwargs = children["MPPC"]
@@ -874,6 +876,26 @@ class MirrorDescanner(model.Emitter):
 
         # physical time for the mirror descanner to perform a flyback (moving back to start of a line scan)
         self.physicalFlybackTime = model.FloatContinuous(150e-6, range=(0, 1e-3), unit='s')
+
+    def _updateShift(self, dwell_time: float):
+        """
+        Sets the shift of the descanner in seconds. The shift is the time the descanner needs to move from one pixel
+        position to the next pixel position. The shift is calculated based on the dwell time of the scanner and the
+        descanner clock period.
+
+        :param dwell_time (float): The requested dwell time in seconds.
+        :return (float): The set shift in seconds.
+        """
+        phase_shift_md = self._metadata[model.MD_CALIB]["phase_shift"]
+        # find closest key to dwell time in the calibration metadata
+        phase_shift = min(phase_shift_md.keys(), key=lambda k: abs(k - dwell_time))
+        logging.debug("Setting mirror descanner phase shift to %s", phase_shift)
+        self.shift.value = phase_shift_md[phase_shift]
+
+    def updateMetadata(self, md):
+        model.HwComponent.updateMetadata(self, md)
+        if model.MD_CALIB in md:
+            self._updateShift(self.parent._ebeam_scanner.dwellTime.value)
 
     def getXAcqSetpoints(self):
         """
