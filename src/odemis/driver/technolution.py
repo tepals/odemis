@@ -54,7 +54,11 @@ if pkg_resources.parse_version(technolution_asm.__version__) < pkg_resources.par
     raise ImportError(f"Version {technolution_asm.__version__} for technolution_asm not supported,"
                       f"version {SUPPORTED_VERSION} or higher is expected")
 
+# for increased pitch images become to large and PIL raises a DecompressionBombError
+Image.MAX_IMAGE_PIXELS = 184960010
+
 VOLT_RANGE = (-10, 10)
+SCAN_AMP_RANGE = ((-1, -1), (1, 1))
 I16_SYM_RANGE = (-2 ** 15, 2 ** 15)  # Note: on HW range is not symmetrically (-2**15, 2**15 - 1)
 DATA_CONTENT_TO_ASM = {"empty": None, "thumbnail": True, "full": False}
 RUNNING = "installation in progress"
@@ -561,9 +565,9 @@ class EBeamScanner(model.Emitter):
         # Since the maximum cell size is 1000 (dividable by 4) the maximum resolution is (1000*8)
         mppcDetectorShape = MPPC.SHAPE
         # size of a single field image (excluding overscanned pixels)
-        self.resolution = model.ResolutionVA((6400, 6400),
+        self.resolution = model.ResolutionVA((12800, 12800),
                                              ((12 * mppcDetectorShape[0], 12 * mppcDetectorShape[1]),
-                                              (1000 * mppcDetectorShape[0], 1000 * mppcDetectorShape[1])),
+                                              (13600, 13600)),
                                              setter=self._setResolution)
         self._shape = self.resolution.range[1]
         # TODO: Dwell time is currently set at a maximum of 40 micro seconds because we cannot calibrate as long as
@@ -578,9 +582,9 @@ class EBeamScanner(model.Emitter):
         # In x we typically scan from negative to positive centered around zero and
         # in y from positive to negative centered around zero.
         # the start of the sawtooth scanning signal
-        self.scanOffset = model.TupleContinuous((0.0, 0.0), range=((-1.0, -1.0), (1.0, 1.0)), cls=(int, float))
+        self.scanOffset = model.TupleContinuous((0.0, 0.0), range=((-2.0, -2.0), (2.0, 2.0)), cls=(int, float))
         # heights of the sawtooth scanner signal (it does not include the offset!)
-        self.scanAmplitude = model.TupleContinuous((0.1, -0.1), range=((-1.0, -1.0), (1.0, 1.0)), cls=(int, float))
+        self.scanAmplitude = model.TupleContinuous((0.1, -0.1), range=((-2.0, -2.0), (2.0, 2.0)), cls=(int, float))
         # FIXME add a check that offset + amplitude >! 2**15 - 1 and offset + amplitude <! -2**15
 
         # delay between the trigger signal to start the acquisition and the scanner to start scanning
@@ -613,8 +617,8 @@ class EBeamScanner(model.Emitter):
         calibration_dwell_time_ticks, number_setpoints = self.getCalibrationDwellTime(total_line_scan_time)
 
         # convert offset and amplitude from [a.u.] to [V]
-        scan_offset = convertRange(self.scanOffset.value, numpy.array(self.scanOffset.range)[:, 1], VOLT_RANGE)
-        scan_amplitude = convertRange(self.scanAmplitude.value, numpy.array(self.scanAmplitude.range)[:, 1], VOLT_RANGE)
+        scan_offset = convertRange(self.scanOffset.value, numpy.array(SCAN_AMP_RANGE)[:, 1], VOLT_RANGE)
+        scan_amplitude = convertRange(self.scanAmplitude.value, numpy.array(SCAN_AMP_RANGE)[:, 1], VOLT_RANGE)
 
         timestamps_setpoints = numpy.linspace(0, total_line_scan_time, number_setpoints)  # [sec]
         # setpoints in x direction resemble a sine
@@ -726,12 +730,12 @@ class EBeamScanner(model.Emitter):
         ##################################################################
         # Convert start of the scanning ramp from [a.u.] to [V].
         scan_start = convertRange(self.scanOffset.value,
-                                  numpy.array(self.scanOffset.range)[:, 1],
+                                  numpy.array(SCAN_AMP_RANGE)[:, 1],
                                   VOLT_RANGE)  # [V]
         # Convert end of the scanning ramp (offset + amplitude) from [a.u.] to [V].
         scan_end = convertRange((self.scanOffset.value[0] + self.scanAmplitude.value[0],
                                  self.scanOffset.value[1] + self.scanAmplitude.value[1]),
-                                numpy.array(self.scanAmplitude.range)[:, 1],
+                                numpy.array(SCAN_AMP_RANGE)[:, 1],
                                 VOLT_RANGE)  # [V]
 
         # Calculate center of the scanning ramp in x and y.
@@ -764,7 +768,7 @@ class EBeamScanner(model.Emitter):
         #########################################################################################
         # Convert the amplitude from [a.u.] to [V].
         scan_amplitude = convertRange(self.scanAmplitude.value,
-                                      numpy.array(self.scanAmplitude.range)[:, 1],
+                                      numpy.array(SCAN_AMP_RANGE)[:, 1],
                                       VOLT_RANGE)  # [V]
 
         # number of pixel positions
@@ -864,9 +868,9 @@ class MirrorDescanner(model.Emitter):
         # direction of the executed descan
         self.rotation = model.FloatContinuous(0, range=(0, 2 * math.pi), unit='rad')
         # start of the sawtooth descanner signal
-        self.scanOffset = model.TupleContinuous((0.0, 0.0), range=((-1, -1), (1, 1)), cls=(int, float))
+        self.scanOffset = model.TupleContinuous((0.0, 0.0), range=((-2, -2), (2, 2)), cls=(int, float))
         # heights of the sawtooth descanner signal (it does not include the offset!)
-        self.scanAmplitude = model.TupleContinuous((0.008, 0.008), range=((-1, -1), (1, 1)), cls=(int, float))
+        self.scanAmplitude = model.TupleContinuous((0.008, 0.008), range=((-2, -2), (2, 2)), cls=(int, float))
         # FIXME add a check that offset + amplitude >! 2**15 - 1 and offset + amplitude <! -2**15
 
         # The shift is the ratio to shift the descanner setpoints by,
@@ -949,15 +953,15 @@ class MirrorDescanner(model.Emitter):
         # [-2**15, 2**15] and finally clipped to [-2**15, 2**15 - 1] before send to the ASM.
 
         # Convert start of the scanning ramp from [a.u.] to [bits].
-        scan_start = convertRange(self.scanOffset.value[0], numpy.array(self.scanOffset.range)[:, 1],
+        scan_start = convertRange(self.scanOffset.value[0], numpy.array(SCAN_AMP_RANGE)[:, 1],
                                   I16_SYM_RANGE)  # [bits]
         # Convert amplitude of the scanning ramp from [a.u.] to [bits].
         scan_amplitude = convertRange(self.scanAmplitude.value[0],
-                                      numpy.array(self.scanAmplitude.range)[:, 1],
+                                      numpy.array(SCAN_AMP_RANGE)[:, 1],
                                       I16_SYM_RANGE)  # [bits]
         # Convert the end of the scanning ramp from [a.u.] to [bits].
         scan_end = convertRange(self.scanOffset.value[0] + self.scanAmplitude.value[0],
-                                numpy.array(self.scanAmplitude.range)[:, 1], I16_SYM_RANGE)  # [bits]
+                                numpy.array(SCAN_AMP_RANGE)[:, 1], I16_SYM_RANGE)  # [bits]
 
         # line scan time including overscanned pixels but without flyback
         scanning_time = dwellTime * x_cell_resolution  # [sec]
@@ -1025,11 +1029,11 @@ class MirrorDescanner(model.Emitter):
         # [-2**15, 2**15] and finally clipped to [-2**15, 2**15 - 1] before send to the ASM.
 
         # Convert start of the scanning ramp from [a.u.] to [bits].
-        scan_start = convertRange(self.scanOffset.value[1], numpy.array(self.scanOffset.range)[:, 1],
+        scan_start = convertRange(self.scanOffset.value[1], numpy.array(SCAN_AMP_RANGE)[:, 1],
                                   I16_SYM_RANGE)  # [bits]
         # Convert end of the scanning ramp (offset + amplitude) from [a.u.] to [bits].
         scan_end = convertRange(self.scanOffset.value[1] + self.scanAmplitude.value[1],
-                                numpy.array(self.scanAmplitude.range)[:, 1], I16_SYM_RANGE)  # [bits]
+                                numpy.array(SCAN_AMP_RANGE)[:, 1], I16_SYM_RANGE)  # [bits]
 
         y_cell_size = self.parent._mppc.cellCompleteResolution.value[1]  # including overscanned pixels [px]
         # calculate the setpoints: one setpoint per row
@@ -1079,10 +1083,10 @@ class MirrorDescanner(model.Emitter):
 
         # convert offset and amplitude from [a.u.] to [bits]
         sine_offset = convertRange(self.scanOffset.value,
-                                   numpy.array(self.scanOffset.range)[:, 1],
+                                   numpy.array(SCAN_AMP_RANGE)[:, 1],
                                    I16_SYM_RANGE)  # [bits]
         sine_amplitude = convertRange(self.scanAmplitude.value,
-                                      numpy.array(self.scanAmplitude.range)[:, 1],
+                                      numpy.array(SCAN_AMP_RANGE)[:, 1],
                                       I16_SYM_RANGE)  # [bits]
 
         timestamps_setpoints = numpy.linspace(0, total_line_scan_time, number_setpoints)  # [sec]
@@ -1146,7 +1150,7 @@ class MirrorDescanner(model.Emitter):
             # flyback is set to minimum value, because the sine starts and ends at the same position
             self.physicalFlybackTime.value = self.physicalFlybackTime.range[0]
             self.scanOffset.value = (0.0, 0.0)
-            scan_amp_rng = self.scanAmplitude.range
+            scan_amp_rng = SCAN_AMP_RANGE
 
             # Set scan amplitude to cover the entire range
             self.scanAmplitude.value = (scan_amp_rng[0][0], scan_amp_rng[-1][0])
@@ -1239,7 +1243,7 @@ class MPPC(model.Detector):
         )
 
         # The minimum of the cell resolution cannot be lower than the minimum effective cell size.
-        self.cellCompleteResolution = model.ResolutionVA((900, 900), ((12, 12), (1000, 1000)))
+        self.cellCompleteResolution = model.ResolutionVA((1700, 1700), ((12, 12), (1700, 1700)))
 
         # acquisition time for a single field image including overscanned pixels and flyback time
         self.frameDuration = model.FloatContinuous(0, range=(0, 100), unit='s', readonly=True)

@@ -359,7 +359,7 @@ class AcquisitionTask(object):
         exception = None
         eff_field_size = (int((1 - self._roa.overlap) * self._multibeam.resolution.value[0]),
                           int((1 - self._roa.overlap) * self._multibeam.resolution.value[1]))
-        self._detector.updateMetadata({model.MD_FIELD_SIZE: eff_field_size})
+        # self._detector.updateMetadata({model.MD_FIELD_SIZE: eff_field_size})
 
         self._detector.updateMetadata({model.MD_SLICE_IDX: self._roa.slice_index.value})
         self._detector.updateMetadata({model.MD_USER: self._username})
