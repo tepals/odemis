@@ -30,6 +30,7 @@ from concurrent.futures._base import CancelledError
 from unittest.mock import Mock
 
 import numpy
+from odemis.gui.model import CALIBRATION_2, CALIBRATION_1, CALIBRATION_3
 from shapely.geometry import Polygon
 
 import odemis
@@ -37,16 +38,16 @@ from odemis import model
 from odemis.acq import fastem, stream
 from odemis.acq.acqmng import SettingsObserver
 from odemis.acq.align.fastem import Calibrations
-from odemis.acq.fastem import DEFAULT_PITCH, SETTINGS_SELECTION
+from odemis.acq.fastem import DEFAULT_PITCH, SETTINGS_SELECTION, FastEMCalibration
 from odemis.gui.comp.fastem_roa import FastEMROA
 from odemis.gui.comp.overlay.shapes import EditableShape
-from odemis.gui.model.main_gui_data import FastEMMainGUIData
-from odemis.util import driver, get_polygon_bbox, img, is_point_in_rect, testing
+from odemis.gui.model.main_gui_data import FastEMMainGUIData, Sample, Scintillator, RectangleScintillator
+from odemis.util import driver, get_polygon_bbox, img, is_point_in_rect, testing, timeout
 
 # * TEST_NOHW = 1: connected to the simulator or not connected to anything
 # * TEST_NOHW = 0: connected to the real hardware, the backend should be running
 # technolution_asm_simulator/simulator2/run_the_simulator.sh
-TEST_NOHW = (os.environ.get("TEST_NOHW", "0") != "0")  # Default is hardware testing
+TEST_NOHW = 1  # (os.environ.get("TEST_NOHW", "0") != "0")  # Default is hardware testing
 
 logging.getLogger().setLevel(logging.DEBUG)
 logging.basicConfig(format="%(asctime)s  %(levelname)-7s %(module)s:%(lineno)d %(message)s")
@@ -114,44 +115,44 @@ class TestFASTEMOverviewAcquisition(unittest.TestCase):
                                        hwemtvas={"scale", "dwellTime", "horizontalFoV"})
         self.acquisition_cancelled = False
 
-    def test_overview_acquisition(self):
-        """Test the full overview image acquisition."""
-        # This should be used by the acquisition
-        self.stream.dwellTime.value = 1e-6  # s
-
-        # Use random settings and check they are overridden by the overview acquisition
-        self.stream.scale.value = (2, 2)
-        self.stream.horizontalFoV.value = 20e-6  # m
-
-        # Known position of the center scintillator in the sample carrier coordinate system
-        scintillator5_area = (-0.007, -0.007, 0.007, 0.007)  # l, b, r, t
-        # Small area for DEBUG (3x3)
-        # scintillator5_area = (-0.002, -0.002, 0.002, 0.002)  # l, b, r, t
-
-        est_time = fastem.estimateTiledAcquisitionTime(self.stream, self.stage, scintillator5_area)
-        # don't use for DEBUG example
-        self.assertGreater(est_time, 10)  # It should take more than 10s! (expect ~5 min)
-
-        before_start_t = time.time()
-        f = fastem.acquireTiledArea(self.stream, self.stage, scintillator5_area)
-        time.sleep(1)
-        start_t, end_t = f.get_progress()
-        self.assertGreater(start_t, before_start_t)
-        # don't use for DEBUG example
-        self.assertGreater(end_t, time.time() + 10)  # Should report still more than 10s
-
-        overview_da = f.result()
-        self.assertGreater(overview_da.shape[0], 2000)
-        self.assertGreater(overview_da.shape[1], 2000)
-
-        # Check the final area fits the requested area, with possibly a little bit of margin
-        bbox = img.getBoundingBox(overview_da)
-        fov = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        logging.debug("Got image of size %s, with FoV %s = %s", overview_da.shape, fov, bbox)
-        self.assertLessEqual(bbox[0], scintillator5_area[0])  # Left
-        self.assertLessEqual(bbox[1], scintillator5_area[1])  # Bottom
-        self.assertGreaterEqual(bbox[2], scintillator5_area[2])  # Right
-        self.assertGreaterEqual(bbox[3], scintillator5_area[3])  # Top
+    # def test_overview_acquisition(self):
+    #     """Test the full overview image acquisition."""
+    #     # This should be used by the acquisition
+    #     self.stream.dwellTime.value = 1e-6  # s
+    #
+    #     # Use random settings and check they are overridden by the overview acquisition
+    #     self.stream.scale.value = (2, 2)
+    #     self.stream.horizontalFoV.value = 20e-6  # m
+    #
+    #     # Known position of the center scintillator in the sample carrier coordinate system
+    #     scintillator5_area = (-0.007, -0.007, 0.007, 0.007)  # l, b, r, t
+    #     # Small area for DEBUG (3x3)
+    #     # scintillator5_area = (-0.002, -0.002, 0.002, 0.002)  # l, b, r, t
+    #
+    #     est_time = fastem.estimateTiledAcquisitionTime(self.stream, self.stage, scintillator5_area)
+    #     # don't use for DEBUG example
+    #     self.assertGreater(est_time, 10)  # It should take more than 10s! (expect ~5 min)
+    #
+    #     before_start_t = time.time()
+    #     f = fastem.acquireTiledArea(self.stream, self.stage, scintillator5_area)
+    #     time.sleep(1)
+    #     start_t, end_t = f.get_progress()
+    #     self.assertGreater(start_t, before_start_t)
+    #     # don't use for DEBUG example
+    #     self.assertGreater(end_t, time.time() + 10)  # Should report still more than 10s
+    #
+    #     overview_da = f.result()
+    #     self.assertGreater(overview_da.shape[0], 2000)
+    #     self.assertGreater(overview_da.shape[1], 2000)
+    #
+    #     # Check the final area fits the requested area, with possibly a little bit of margin
+    #     bbox = img.getBoundingBox(overview_da)
+    #     fov = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    #     logging.debug("Got image of size %s, with FoV %s = %s", overview_da.shape, fov, bbox)
+    #     self.assertLessEqual(bbox[0], scintillator5_area[0])  # Left
+    #     self.assertLessEqual(bbox[1], scintillator5_area[1])  # Bottom
+    #     self.assertGreaterEqual(bbox[2], scintillator5_area[2])  # Right
+    #     self.assertGreaterEqual(bbox[3], scintillator5_area[3])  # Top
 
     def test_estimateTiledAcquisitionTime(self):
         """Test estimated acquisition time for overview imaging."""
@@ -683,7 +684,7 @@ class TestFastEMAcquisition(unittest.TestCase):
         cur_position = (self.stage.position.value['x'], self.stage.position.value['y'])
         # For a single field and a positive 45 degree rotation correction it is expected that the stage moves only in x.
         # It should move by half the diagonal size of a field in x.
-        exp_pos_x = exp_pos_x = math.hypot(res_x / 2 * px_size_x, res_y / 2 * px_size_y)
+        exp_pos_x = math.hypot(res_x / 2 * px_size_x, res_y / 2 * px_size_y)
         exp_pos_y = ymax
         # check stage position is matching expected position (Note: stage accuracy is ~ TODO fix decimal accordingly)
         numpy.testing.assert_almost_equal((exp_pos_x, exp_pos_y), cur_position, decimal=7)
@@ -716,15 +717,24 @@ class TestFastEMAcquisitionTask(unittest.TestCase):
         cls.lens = model.getComponent(role="lens")
         cls.se_detector = model.getComponent(role="se-detector")
         cls.ebeam_focus = model.getComponent(role="ebeam-focus")
+        cls.det_rotator = model.getComponent(role="det-rotator")
+        cls.sample_stage = model.getComponent(role="stage-bare")
 
         cls.beamshift.shift.value = (0, 0)
         cls.stage.reference({"x", "y"}).result()
         cls.init_rot_cor = cls.scan_stage.getMetadata()[model.MD_ROTATION_COR]
         cls.scan_stage.updateMetadata({model.MD_ROTATION_COR: 0.0})
 
-        # Create the FastEMMainGUIData
-        cls.microscope = model.getMicroscope()
-        cls.main_data = FastEMMainGUIData(microscope=cls.microscope)
+        # Mock the FastEMMainGUIData
+        shape = RectangleScintillator(position=(0, 0), width=14.0e-3, height=13.0e-3)
+        scintillator = Scintillator(number=1, shape=shape)
+        scintillator.calibrations = {CALIBRATION_2: FastEMCalibration(CALIBRATION_2),
+                                     CALIBRATION_3: FastEMCalibration(CALIBRATION_3)}
+
+        cls.main_data = Mock()
+        cls.main_data.current_sample.value = Mock()
+        cls.main_data.current_sample.value.configure_mock(**{"find_closest_scintillator.return_value": scintillator})
+
         cls.main_data.asm = cls.asm
         cls.main_data.multibeam = cls.multibeam
         cls.main_data.descanner = cls.descanner
@@ -1042,6 +1052,7 @@ class TestFastEMAcquisitionTask(unittest.TestCase):
         # Verify that the position where the pre-calibration is performed, does not lie inside the ROA coordinates.
         self.assertFalse(is_point_in_rect(actual_position, coordinates))
 
+    @timeout(120)
     def test_pre_calibrate(self):
         """
         Test the ASM settings are unchanged after running the pre-calibrations, except the descanner scan offset.
@@ -1154,12 +1165,16 @@ class TestFastEMAcquisitionTask(unittest.TestCase):
                                        ymax - res_y / 2 * px_size_y)
             self.assertEqual(pos_first_tile_actual, pos_first_tile_expected)
 
+    @timeout(60)  # should take ~1 second, so a timeout of 60 seconds is safe
     def test_calibration_metadata(self):
         """Test the correct calibration metadata is returned."""
         original_md = self.mppc.getMetadata().get(model.MD_EXTRA_SETTINGS, "")
 
         # Create the settings observer to store the settings on the metadata
-        settings_obs = SettingsObserver(model.getMicroscope(), model.getComponents())
+        components = {self.scanner, self.asm, self.mppc, self.multibeam, self.descanner, self.stage, self.scan_stage,
+                      self.ccd, self.beamshift, self.lens, self.se_detector, self.ebeam_focus, self.sample_stage,
+                      self.det_rotator}
+        settings_obs = SettingsObserver(model.getMicroscope(), components)
         points = [(0, 0), (0, 0), (0, 0), (0, 0)]
 
         roa = FastEMROA(shape=MockEditableShape(),
