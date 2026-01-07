@@ -445,7 +445,7 @@ class ShapesOverlay(WorldOverlay):
     def on_right_down(self, evt):
         if not self.active.value:
             return super().on_right_down(evt)
-
+        self._selected_shape = self._get_shape(evt.Position)
         if self._selected_shape:
             self._selected_shape.on_right_down(evt)
         else:
@@ -461,6 +461,15 @@ class ShapesOverlay(WorldOverlay):
             state = self._selected_shape.get_state()
             if state:
                 shape_state = ShapeState(self._selected_shape, state, Action.CREATE)
+                if not self._undo_stack or self._undo_stack[-1] != shape_state:
+                    self._undo_stack.append(shape_state)
+                    self._redo_stack.clear()  # Clear redo stack when a shape's state is saved
+        elif self._selected_shape:
+            self._selected_shape.on_right_up(evt)
+            state = self._selected_shape.get_state()
+            if state:
+                action = Action.CREATE if self._is_new_shape else Action.EDIT
+                shape_state = ShapeState(self._selected_shape, state, action)
                 if not self._undo_stack or self._undo_stack[-1] != shape_state:
                     self._undo_stack.append(shape_state)
                     self._redo_stack.clear()  # Clear redo stack when a shape's state is saved

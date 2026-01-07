@@ -256,7 +256,7 @@ class PolygonOverlay(EditableShape, LineEditingMixin, WorldOverlay):
         :returns: whether the view point is near the edges or on the rotation knob
             or inside the shape.
         """
-        # A polygon should have atleast 2 points after on_right_up
+        # A polygon should have at least 2 points after on_right_up
         if self.right_click_finished:
             if len(self._points) > 2:
                 hover, _ = self.get_hover(v_point)
@@ -270,16 +270,8 @@ class PolygonOverlay(EditableShape, LineEditingMixin, WorldOverlay):
             self.cnvs.update_drawing()
 
     def on_left_up(self, evt):
-        is_mode_rotation_edit = self.selection_mode in (SEL_MODE_ROTATION, SEL_MODE_EDIT)
         LineEditingMixin._on_left_up(self, evt)
-        if self.right_click_finished:
-            self._phys_to_view()
-            self.selected.value = self.check_point_proximity(evt.Position)
-            # While selection mode is SEL_MODE_ROTATION or SEL_MODE_EDIT it can be that the hover
-            # is outside the edge and left up event is called, update the points VA in this
-            # corner case
-            if self.selected.value or is_mode_rotation_edit:
-                self.points.value = self._points
+
         self.cnvs.update_drawing()
 
     def on_right_down(self, evt):
@@ -289,13 +281,24 @@ class PolygonOverlay(EditableShape, LineEditingMixin, WorldOverlay):
     def on_right_up(self, evt):
         LineEditingMixin._on_right_up(self, evt)
         self._view_to_phys()
-        if len(self._points) <= 2:
-            logging.warning("Cannot create a polygon for less than 3 points.")
-            self.reset()
+        if not self.is_created.value:
+            if len(self._points) <= 2:
+                logging.warning("Cannot create a polygon for less than 3 points.")
+                self.reset()
+            else:
+                self.is_created.value = True
+            # Set initial value
+            self.points.value = self._points
         else:
-            self.is_created.value = True
-        # Set initial value
-        self.points.value = self._points
+            is_mode_rotation_edit = self.selection_mode in (SEL_MODE_ROTATION, SEL_MODE_EDIT)
+            self._phys_to_view()
+            self.selected.value = self.check_point_proximity(evt.Position)  # HERE shape is selected
+            # While selection mode is SEL_MODE_ROTATION or SEL_MODE_EDIT it can be that the hover
+            # is outside the edge and left up event is called, update the points VA in this
+            # corner case
+            if self.selected.value or is_mode_rotation_edit:
+                self.points.value = self._points
+
         self.cnvs.update_drawing()
 
     def on_motion(self, evt):
