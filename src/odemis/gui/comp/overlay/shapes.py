@@ -218,6 +218,7 @@ class ShapesOverlay(WorldOverlay):
         self._undo_action = False
         self._redo_action = False
         self.is_ctrl_down = False
+        self.should_create = False
         if tool:
             self.tool = tool
             if tool_va:
@@ -366,9 +367,10 @@ class ShapesOverlay(WorldOverlay):
             # New or previously created shape
             else:
                 self._selected_shape = self._get_shape(evt.Position)
-                if self._selected_shape is None:
+                if self._selected_shape is None or self.should_create:
                     self._selected_shape = self._create_new_shape()
                     self._is_new_shape = True
+                    self.should_create = False
                 self._selected_shape.on_left_down(evt)
                 self._deselect_shapes()
         WorldOverlay.on_left_down(self, evt)
@@ -412,6 +414,7 @@ class ShapesOverlay(WorldOverlay):
                 self._shape_to_copy._set_value(None, force_write=True)
                 self.cnvs.set_default_cursor(wx.CURSOR_CROSS)
                 self.cnvs.request_drawing_update()
+                self.should_create = True
             elif evt.GetKeyCode() == wx.WXK_CONTROL_C:
                 if self._selected_shape.is_created.value:
                     # Deselect the selected shape which will be copied
