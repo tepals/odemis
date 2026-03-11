@@ -22,6 +22,8 @@ Odemis. If not, see http://www.gnu.org/licenses/.
 import logging
 
 import cv2
+from scipy.ndimage import sobel, convolve
+
 import numpy
 from scipy import ndimage
 from scipy.optimize import curve_fit
@@ -115,7 +117,7 @@ def Measure1d(image):
     return 1 / abs(popt[2])
 
 
-def MeasureSpotsFocus(image):
+def MeasureSpotsFocusOld(image):
     """
     Focus measurement metric based on Tenengrad variance:
         Pech, J.; Cristobal, G.; Chamorro, J. & Fernandez, J. Diatom autofocusing in brightfield microscopy: a
@@ -126,11 +128,71 @@ def MeasureSpotsFocus(image):
     image (model.DataArray): Optical image
     returns (float): The focus level of the image (higher is better)
     """
+    # Use scipy.ndimage.sobel for better performance and fewer dependencies
+    # Convert to float64 to avoid integer overflow when squaring gradients
+    if image.dtype not in (numpy.float32, numpy.float64):
+        image = image.astype(numpy.float64)
+
+    # Use scipy.ndimage.sobel with reflect mode for better edge handling
+    sobelx = sobel(image, axis=0, mode='reflect')
+    sobely = sobel(image, axis=1, mode='reflect')
+
+    # Combine gradients and compute variance (Tenengrad method)
+    sobel_image = sobelx ** 2 + sobely ** 2
+    return float(sobel_image.var())
+
+opencv_sobel_x_5x5 = numpy.array([[1, 2, 0, -2, -1],
+                                 [4, 8, 0, -8, -4],
+                                 [6, 12, 0, -12, -6],
+                                 [4, 8, 0, -8, -4],
+                                 [1, 2, 0, -2, -1]], dtype=numpy.float64)
+
+opencv_sobel_y_5x5 = numpy.array([[1, 4, 6, 4, 1],
+                                 [2, 8, 12, 8, 2],
+                                 [0, 0, 0, 0, 0],
+                                 [-2, -8, -12, -8, -2],
+                                 [-1, -4, -6, -4, -1]], dtype=numpy.float64)
+
+def MeasureSpotsFocus(image):
+    """
+    Focus measurement metric based on Tenengrad variance:
+    Pech, J.; Cristobal, G.; Chamorro, J. & Fernandez, J. Diatom autofocusing in brightfield microscopy: a
+    comparative study. 2000.
+
+    Given an image, the focus measure is calculated using the variance of a Sobel filter applied in the
+    x and y directions of the raw data.
+    image (model.DataArray): Optical image
+    returns (float): The focus level of the image (higher is better)
+    """
+    # Always convert to float64 to prevent integer overflow when convolving with Sobel kernels
+    # The Sobel kernels contain negative values, and integer types (especially uint16)
+    # cannot represent negative gradients, causing incorrect results
+    image = image.astype(numpy.float64)
+
+    sobelx = convolve(image, opencv_sobel_x_5x5, mode='mirror')  # axis=1
+    sobely = convolve(image, opencv_sobel_y_5x5, mode='mirror')  # axis=0
+    sobel_image = sobelx ** 2 + sobely ** 2
+    return float(sobel_image.var())
+
+
+def MeasureSpotsFocusCV(image):
+    """
+    Focus measurement metric based on Tenengrad variance:
+    Pech, J.; Cristobal, G.; Chamorro, J. & Fernandez, J. Diatom autofocusing in brightfield microscopy: a
+    comparative study. 2000.
+
+    Given an image, the focus measure is calculated using the variance of a Sobel filter applied in the
+    x and y directions of the raw data.
+    image (model.DataArray): Optical image
+    returns (float): The focus level of the image (higher is better)
+    """
     # TODO: maybe switch to scipy.ndimage.sobel ?
     # OpenCV only supports int of 8 & 16 bits and float32/64 images. So if we get anything else,
     # we first convert to float64, to make sure it's compatible.
     if image.dtype not in (numpy.int8, numpy.uint8, numpy.int16, numpy.uint16, numpy.float32, numpy.float64):
-         image = image.astype(numpy.float64)
+        image = image.astype(numpy.float64)
+    # sobelx = sobel(image, axis=0)  # or axis=1 for y
+    # sobely = sobel(image, axis=1)
     sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=5)
     sobely = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=5)
     sobel_image = sobelx ** 2 + sobely ** 2

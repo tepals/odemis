@@ -19,7 +19,7 @@ PARTICULAR  PURPOSE. See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License along with
 Odemis. If not, see http://www.gnu.org/licenses/.
 """
-
+import cProfile
 import logging
 import threading
 import time
@@ -29,6 +29,7 @@ from concurrent.futures._base import CANCELLED, FINISHED, RUNNING
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
 import numpy
+import scipy
 
 from odemis import model
 from odemis.acq.align import light
@@ -167,6 +168,9 @@ def _DoBinaryFocus(
     # * if the focus actuator is not precise (eg, open loop), it's hard to
     #   even go back to the same focus position when wanted
     logging.debug("Starting binary autofocus on detector %s...", detector.name)
+    print("tstart")
+    _profiler = cProfile.Profile()
+    _profiler.enable()
 
     try:
         # Big timeout, most important being that it's shorter than eternity
@@ -271,6 +275,14 @@ def _DoBinaryFocus(
         # of the focus levels measured for the same focus position)
         logging.debug("Step factor used for autofocus: %g", step_factor)
         step_cntr = 1
+        #
+        # def minimize_func(x):
+        #     focus.moveAbsSync({"z": right})
+        #     image = AcquireNoBackground(detector, dfbkg, timeout)
+        #     return Measure(image)
+        #
+        # scipy.optimize.minimize(minimize_func, )
+
         while step_factor >= 1 and step_cntr <= MAX_STEPS_NUMBER:
             # TODO: update the estimated time (based on how long it takes to
             # move + acquire, and how many steps are approximately left)
@@ -332,8 +344,8 @@ def _DoBinaryFocus(
                 i_max = fm_range.index(best_fm)
                 best_pos = pos_range[i_max]
 
-            if future._autofocus_state == CANCELLED:
-                raise CancelledError()
+            # if future._autofocus_state == CANCELLED:
+            #     raise CancelledError()
 
             # if best focus was found at the center
             if i_max == 1:
@@ -382,10 +394,13 @@ def _DoBinaryFocus(
         # Go to the best position known so far
         focus.moveAbsSync({"z": best_pos})
     finally:
-        with future._autofocus_lock:
-            if future._autofocus_state == CANCELLED:
-                raise CancelledError()
-            future._autofocus_state = FINISHED
+        _profiler.disable()
+        _profiler.dump_stats("/home/pals/Desktop/autofocus.prof")
+        print("dumping")
+        # with future._autofocus_lock:
+        #     if future._autofocus_state == CANCELLED:
+        #         raise CancelledError()
+        #     future._autofocus_state = FINISHED
 
 
 def _DoExhaustiveFocus(
