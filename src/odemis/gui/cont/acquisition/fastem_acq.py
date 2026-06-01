@@ -508,6 +508,8 @@ class FastEMOverviewAcquiController(object):
                 return
             if self._overview_future.task_resumer(self._overview_future):
                 self._is_paused = False
+                if self._fs_connector:
+                    self._fs_connector.resume()
                 self.btn_pause.SetLabel("Pause")
                 self._set_status_message("Acquisition resumed.")
         else:
@@ -516,6 +518,8 @@ class FastEMOverviewAcquiController(object):
                 return
             if self._overview_future.task_pauser(self._overview_future):
                 self._is_paused = True
+                if self._fs_connector:
+                    self._fs_connector.pause()
                 self.btn_pause.SetLabel("Resume")
                 self._set_status_message("Acquisition paused.")
 

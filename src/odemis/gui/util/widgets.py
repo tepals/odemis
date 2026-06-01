@@ -283,6 +283,7 @@ class ProgressiveFutureConnector(object):
         self._end = None
         self._prev_left = None
         self._last_update = 0  # when was the last GUI update
+        self._paused = False
 
         # a repeating timer, always called in the GUI thread
         self._timer = wx.PyTimer(self._update_progress)
@@ -294,6 +295,20 @@ class ProgressiveFutureConnector(object):
 
         future.add_update_callback(self._on_progress)
         future.add_done_callback(self._on_done)
+
+    def pause(self):
+        """Pause periodic GUI updates of progress controls."""
+        if self._paused:
+            return
+        self._paused = True
+        self._timer.Stop()
+
+    def resume(self):
+        """Resume periodic GUI updates of progress controls."""
+        if not self._paused:
+            return
+        self._paused = False
+        self._timer.Start(250)
 
     def _on_progress(self, _, start, end):
         """ Process any progression

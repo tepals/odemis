@@ -159,6 +159,32 @@ class TestFASTEMOverviewAcquisitionPause(unittest.TestCase):
         self.assertFalse(future.task_resumer(future))
         self.assertFalse(acquisition._pause_event.is_set())
 
+    def test_resume_shifts_future_progress(self):
+        """Test resume extends progress timing by paused duration."""
+        future = model.ProgressiveFuture(start=100.0, end=200.0)
+        acquisition = fastem.OverviewAcquisition(future)
+        acquisition._sub_future = model.ProgressiveFuture(start=120.0, end=220.0)
+
+        fake_times = iter([300.0] + [305.0] * 20)
+        with patch("odemis.acq.fastem.time.time", side_effect=lambda: next(fake_times)):
+            before_start, before_end = future.start_time, future.end_time
+            before_sub_start, before_sub_end = (
+                acquisition._sub_future.start_time,
+                acquisition._sub_future.end_time,
+            )
+            self.assertTrue(future.task_pauser(future))
+            self.assertTrue(future.task_resumer(future))
+            after_start, after_end = future.start_time, future.end_time
+            after_sub_start, after_sub_end = (
+                acquisition._sub_future.start_time,
+                acquisition._sub_future.end_time,
+            )
+
+        self.assertEqual(after_start - before_start, 5.0)
+        self.assertEqual(after_end - before_end, 5.0)
+        self.assertEqual(after_sub_start - before_sub_start, 5.0)
+        self.assertEqual(after_sub_end - before_sub_end, 5.0)
+
 
 class TestFASTEMOverviewAcquisition(unittest.TestCase):
     """Test FASTEM overview image acquisition."""

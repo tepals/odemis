@@ -1016,6 +1016,8 @@ class OverviewAcquisition(object):
     def __init__(self, future: model.ProgressiveFuture) -> None:
         self._sub_future = model.ProgressiveFuture()
         self._pause_event = threading.Event()
+        self._pause_start_time: Optional[float] = None
+        self._pause_lock = threading.Lock()
         self._future = future
         self._future.task_canceller = self._cancel_acquisition
         self._future.task_pauser = self._pause_acquisition
@@ -1024,17 +1026,35 @@ class OverviewAcquisition(object):
     def _cancel_acquisition(self, future) -> bool:
         self._sub_future.cancel()
         self._pause_event.clear()
+        with self._pause_lock:
+            self._pause_start_time = None
         return True
 
     def _pause_acquisition(self, future) -> bool:
         if self._future.done():
             return False
-        self._pause_event.set()
+        with self._pause_lock:
+            if self._pause_start_time is None:
+                self._pause_start_time = time.time()
+            self._pause_event.set()
         return True
 
     def _resume_acquisition(self, future) -> bool:
         if self._future.done():
             return False
+        with self._pause_lock:
+            if self._pause_start_time is None:
+                self._pause_event.clear()
+                return True
+            paused_duration = time.time() - self._pause_start_time
+            self._pause_start_time = None
+        if paused_duration > 0:
+            for paused_future in (self._future, self._sub_future):
+                if paused_future.done():
+                    continue
+                start = paused_future.start_time
+                end = paused_future.end_time
+                paused_future.set_progress(start=start + paused_duration, end=end + paused_duration)
         self._pause_event.clear()
         return True
 
