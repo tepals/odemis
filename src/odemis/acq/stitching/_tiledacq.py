@@ -105,7 +105,7 @@ class TiledAcquisitionTask(object):
 
     def __init__(self, streams, stage, region, overlap, settings_obs=None, log_path=None, future=None, zlevels=None,
                  registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
-                 focus_points=None, focus_range=None, centered_acq=True):
+                 focus_points=None, focus_range=None, centered_acq=True, pause_event: Optional[threading.Event] = None):
         """
         :param streams: (list of Streams) the streams to acquire
         :param stage: (Actuator) the sample stage to move to the possible tiles locations
@@ -141,6 +141,7 @@ class TiledAcquisitionTask(object):
         self.average_acquisition_time = None
         self._overlap = overlap
         self._centered_acq = centered_acq
+        self._pause_event = pause_event
         self._polygon = None
         self._save_executor = None
         if future is not None:
@@ -416,6 +417,16 @@ class TiledAcquisitionTask(object):
             future.running_subf.cancel()
             logging.debug("Acquisition cancelled.")
         return True
+
+    def _wait_if_paused(self) -> None:
+        """Block while paused and keep cancellation responsive."""
+        if self._pause_event is None:
+            return
+
+        while self._pause_event.is_set():
+            if self._future._task_state == CANCELLED:
+                raise CancelledError()
+            time.sleep(0.1)
 
     def _sort_tile_indices_zigzag(self, tile_indices: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
         """
@@ -724,6 +735,7 @@ class TiledAcquisitionTask(object):
         """
         zstack = []
         for z in self._zlevels:
+            self._wait_if_paused()
             logging.debug(f"Moving focus for tile {ix}x{iy} to {z}.")
             stream.focuser.moveAbsSync({'z': z})
             da = self._acquireStreamTile(i, ix, iy, stream)
@@ -838,6 +850,7 @@ class TiledAcquisitionTask(object):
         zigzag_indices = self._sort_tile_indices_zigzag(self._tile_indices)
 
         for ix, iy in zigzag_indices:
+            self._wait_if_paused()
             if i > 0:
                 self.average_acquisition_time = (time.time() - start_time) / i
 
@@ -847,6 +860,7 @@ class TiledAcquisitionTask(object):
             prev_idx = ix, iy
 
             acquisition_start = time.time()
+            self._wait_if_paused()
             if self._focus_points is not None:
                 self._refocus()
 
@@ -1137,7 +1151,8 @@ def estimateTiledAcquisitionMemory(*args, **kwargs):
 
 def acquireTiledArea(streams, stage, area, overlap=0.2, settings_obs=None, log_path=None, zlevels=None,
                      registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
-                     focus_points=None, focus_range=None, centered_acq=True):
+                     focus_points=None, focus_range=None, centered_acq=True,
+                     pause_event: Optional[threading.Event] = None):
     """
     Start a tiled acquisition task for the given streams (SEM or FM) in order to
     build a complete view of the TEM grid. Needed tiles are first acquired for
@@ -1154,7 +1169,8 @@ def acquireTiledArea(streams, stage, area, overlap=0.2, settings_obs=None, log_p
     # Create a tiled acquisition task
     task = TiledAcquisitionTask(streams, stage, area, overlap, settings_obs, log_path, future=future, zlevels=zlevels,
                                 registrar=registrar, weaver=weaver, focusing_method=focusing_method,
-                                focus_points=focus_points, focus_range=focus_range, centered_acq=centered_acq)
+                                focus_points=focus_points, focus_range=focus_range, centered_acq=centered_acq,
+                                pause_event=pause_event)
     future.task_canceller = task._cancelAcquisition  # let the future cancel the task
     # Estimate memory and check if it's sufficient to decide on running the task
     mem_sufficient, mem_est = task.estimateMemory()

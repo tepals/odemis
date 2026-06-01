@@ -1015,11 +1015,27 @@ class OverviewAcquisition(object):
 
     def __init__(self, future: model.ProgressiveFuture) -> None:
         self._sub_future = model.ProgressiveFuture()
+        self._pause_event = threading.Event()
         self._future = future
         self._future.task_canceller = self._cancel_acquisition
+        self._future.task_pauser = self._pause_acquisition
+        self._future.task_resumer = self._resume_acquisition
 
     def _cancel_acquisition(self, future) -> bool:
         self._sub_future.cancel()
+        self._pause_event.clear()
+        return True
+
+    def _pause_acquisition(self, future) -> bool:
+        if self._future.done():
+            return False
+        self._pause_event.set()
+        return True
+
+    def _resume_acquisition(self, future) -> bool:
+        if self._future.done():
+            return False
+        self._pause_event.clear()
         return True
 
     def run(self, stream, stage, area, live_stream, scanner_conf=None, reference_stage=True, file_pattern=None,
@@ -1119,7 +1135,8 @@ class OverviewAcquisition(object):
         # Note, for debugging, it's possible to keep the intermediary tiles with log_path="./tile.ome.tiff"
         self._sub_future = stitching.acquireTiledArea([stream], stage, area, overlap, registrar=REGISTER_IDENTITY,
                                                       focusing_method=FocusingMethod.NONE, weaver=WEAVER_COLLAGE,
-                                                      log_path=file_pattern, centered_acq=centered_acq)
+                                                      log_path=file_pattern, centered_acq=centered_acq,
+                                                      pause_event=self._pause_event)
         self._sub_future.add_update_callback(_pass_future_progress)
 
         das = []

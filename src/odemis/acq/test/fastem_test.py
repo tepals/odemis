@@ -27,7 +27,8 @@ import os
 import time
 import unittest
 from concurrent.futures._base import CancelledError
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy
 from shapely.geometry import Polygon
@@ -90,6 +91,73 @@ class MockEditableShape(EditableShape):
 
     def reset(self):
         pass
+
+
+class TestFASTEMOverviewAcquisitionPause(unittest.TestCase):
+    """Test pause and resume controls for FASTEM overview acquisition."""
+
+    @staticmethod
+    def _make_stream() -> SimpleNamespace:
+        """Create a lightweight stream object for overview acquisition tests."""
+        emitter = SimpleNamespace(
+            immersion=SimpleNamespace(value=False),
+            blanker=SimpleNamespace(value=False),
+        )
+        return SimpleNamespace(emitter=emitter)
+
+    def test_pause_resume_handlers(self):
+        """Test that pause/resume handlers toggle the internal pause event."""
+        future = model.ProgressiveFuture()
+        acquisition = fastem.OverviewAcquisition(future)
+
+        self.assertTrue(hasattr(future, "task_pauser"))
+        self.assertTrue(hasattr(future, "task_resumer"))
+        self.assertFalse(acquisition._pause_event.is_set())
+
+        self.assertTrue(future.task_pauser(future))
+        self.assertTrue(acquisition._pause_event.is_set())
+
+        self.assertTrue(future.task_resumer(future))
+        self.assertFalse(acquisition._pause_event.is_set())
+
+    def test_pause_event_is_forwarded_to_tiled_acquisition(self):
+        """Test pause event forwarding to the tiled acquisition future."""
+        future = model.ProgressiveFuture()
+        acquisition = fastem.OverviewAcquisition(future)
+        sub_future = Mock()
+        sub_future.add_update_callback = Mock()
+        acquired_da = Mock()
+        sub_future.result.return_value = [acquired_da]
+
+        with patch("odemis.acq.fastem.fastem_conf.configure_scanner"), patch(
+            "odemis.acq.fastem.stitching.acquireTiledArea", return_value=sub_future
+        ) as mocked_acquire_tiled_area:
+            stream = self._make_stream()
+            stage = Mock()
+            result_da = acquisition.run(
+                stream=stream,
+                stage=stage,
+                area=[(0.0, 0.0), (1.0, 0.0), (0.5, 1.0)],
+                live_stream=None,
+                reference_stage=False,
+            )
+
+        self.assertIs(result_da, acquired_da)
+        self.assertTrue(stream.emitter.blanker.value)
+        self.assertIs(
+            mocked_acquire_tiled_area.call_args.kwargs["pause_event"],
+            acquisition._pause_event,
+        )
+
+    def test_pause_resume_handlers_return_false_when_future_done(self):
+        """Test pause/resume handlers reject commands once the future is done."""
+        future = model.ProgressiveFuture()
+        acquisition = fastem.OverviewAcquisition(future)
+        future.cancel()
+
+        self.assertFalse(future.task_pauser(future))
+        self.assertFalse(future.task_resumer(future))
+        self.assertFalse(acquisition._pause_event.is_set())
 
 
 class TestFASTEMOverviewAcquisition(unittest.TestCase):

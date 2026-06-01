@@ -742,6 +742,7 @@ class xrcpnl_tab_fastem_setup(wx.Panel):
         self.lbl_acq_estimate = xrc.XRCCTRL(self, "lbl_acq_estimate")
         self.gauge_acq = xrc.XRCCTRL(self, "gauge_acq")
         self.btn_cancel_acq = xrc.XRCCTRL(self, "btn_cancel_acq")
+        self.btn_pause_acq = xrc.XRCCTRL(self, "btn_pause_acq")
         self.btn_acq = xrc.XRCCTRL(self, "btn_acq")
         self.pnl_calib = xrc.XRCCTRL(self, "pnl_calib")
         self.pnl_calib_status = xrc.XRCCTRL(self, "pnl_calib_status")
@@ -8942,6 +8943,20 @@ D$T\xf2
                                 </XRCED>
                               </object>
                               <flag>wxALL</flag>
+                              <border>10</border>
+                            </object>
+                            <object class="sizeritem">
+                              <object class="ImageTextButton" name="btn_pause_acq">
+                                <height>24</height>
+                                <face_colour>def</face_colour>
+                                <label>Pause</label>
+                                <hidden>1</hidden>
+                                <style>wxALIGN_CENTRE</style>
+                                <XRCED>
+                                  <assign_var>1</assign_var>
+                                </XRCED>
+                              </object>
+                              <flag>wxRIGHT|wxTOP|wxBOTTOM</flag>
                               <border>10</border>
                             </object>
                             <orient>wxHORIZONTAL</orient>
@@ -19923,4 +19938,3 @@ D\x02\x12\x0c/\x81\x10.\xc4\xcc\xb0\x8f\xa1\x9e\xa1\x81a/\x90\x05\x06\x8d\
     wx.MemoryFSHandler.AddFile('XRC/panel_tab_sparc_chamber/______img_icon_dialog_warning_png', bytearray(______img_icon_dialog_warning_png))
     wx.MemoryFSHandler.AddFile('XRC/panel_tab_sparc_chamber/______img_icon_ico_chevron_up_png', bytearray(______img_icon_ico_chevron_up_png))
     __res.Load('memory:XRC/panel_tab_sparc_chamber/panel_tab_sparc_chamber_xrc')
-
