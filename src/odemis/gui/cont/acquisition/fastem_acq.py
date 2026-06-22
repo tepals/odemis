@@ -520,8 +520,41 @@ class FastEMOverviewAcquiController(object):
                 self._is_paused = True
                 if self._fs_connector:
                     self._fs_connector.pause()
-                self.btn_pause.SetLabel("Resume")
-                self._set_status_message("Acquisition paused.")
+                # Disable all buttons until the current tile finishes and the
+                # acquisition has actually paused.
+                self.btn_pause.Enable(False)
+                self.btn_pause.SetLabel("Pausing...")
+                self.btn_cancel.Enable(False)
+                self._set_status_message("Pausing after current tile...")
+                t = threading.Thread(target=self._wait_for_actual_pause, daemon=True)
+                t.start()
+
+    def _wait_for_actual_pause(self):
+        """Wait in a background thread until the acquisition has truly paused.
+
+        Blocks until the current tile finishes and the tiled acquisition task
+        enters its pause-wait loop, then schedules a GUI update via
+        _on_actually_paused.
+        """
+        future = self._overview_future
+        if future is None or not hasattr(future, "is_paused_event"):
+            wx.CallAfter(self._on_actually_paused)
+            return
+        # Poll with a short timeout so we also exit if the future finishes.
+        while not future.is_paused_event.wait(timeout=0.2):
+            if future.done():
+                return  # Acquisition ended before it could pause; GUI is handled by full_acquisition_done.
+        wx.CallAfter(self._on_actually_paused)
+
+    @call_in_wx_main
+    def _on_actually_paused(self):
+        """Re-enable the relevant buttons once the acquisition is truly paused."""
+        if not self._is_paused:
+            return  # Resumed or cancelled in the meantime; nothing to do.
+        self.btn_pause.SetLabel("Resume")
+        self.btn_pause.Enable()
+        self.btn_cancel.Enable()
+        self._set_status_message("Acquisition paused.")
 
     def on_acquisition_done(self, future, num):
         """

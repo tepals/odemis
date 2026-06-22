@@ -105,7 +105,8 @@ class TiledAcquisitionTask(object):
 
     def __init__(self, streams, stage, region, overlap, settings_obs=None, log_path=None, future=None, zlevels=None,
                  registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
-                 focus_points=None, focus_range=None, centered_acq=True, pause_event: Optional[threading.Event] = None):
+                 focus_points=None, focus_range=None, centered_acq=True, pause_event: Optional[threading.Event] = None,
+                 paused_event: Optional[threading.Event] = None):
         """
         :param streams: (list of Streams) the streams to acquire
         :param stage: (Actuator) the sample stage to move to the possible tiles locations
@@ -131,6 +132,10 @@ class TiledAcquisitionTask(object):
         :param centered_acq: (bool) If True, center the acquisition area on the given region; any extra area is added
             symmetrically to all sides of the bounding box. If False, the top-left of the acquisition area is aligned
             with the top-left of the bounding box.
+        :param pause_event: (threading.Event or None) when set, acquisition will pause between tiles.
+        :param paused_event: (threading.Event or None) set by the task while it is actually blocked waiting
+            for pause_event to be cleared. Allows callers to detect when the current tile has finished
+            and the acquisition has truly paused.
         """
         self._future = future
         self._streams = streams
@@ -142,6 +147,7 @@ class TiledAcquisitionTask(object):
         self._overlap = overlap
         self._centered_acq = centered_acq
         self._pause_event = pause_event
+        self._paused_event = paused_event
         self._polygon = None
         self._save_executor = None
         if future is not None:
@@ -419,14 +425,25 @@ class TiledAcquisitionTask(object):
         return True
 
     def _wait_if_paused(self) -> None:
-        """Block while paused and keep cancellation responsive."""
-        if self._pause_event is None:
+        """Block while paused and keep cancellation responsive.
+
+        Sets _paused_event (if provided) while blocking so that callers can
+        detect when the current tile has finished and the acquisition has truly
+        paused. Clears it again once the acquisition resumes or is cancelled.
+        """
+        if self._pause_event is None or not self._pause_event.is_set():
             return
 
-        while self._pause_event.is_set():
-            if self._future._task_state == CANCELLED:
-                raise CancelledError()
-            time.sleep(0.1)
+        if self._paused_event is not None:
+            self._paused_event.set()
+        try:
+            while self._pause_event.is_set():
+                if self._future._task_state == CANCELLED:
+                    raise CancelledError()
+                time.sleep(0.1)
+        finally:
+            if self._paused_event is not None:
+                self._paused_event.clear()
 
     def _sort_tile_indices_zigzag(self, tile_indices: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
         """
@@ -1152,7 +1169,8 @@ def estimateTiledAcquisitionMemory(*args, **kwargs):
 def acquireTiledArea(streams, stage, area, overlap=0.2, settings_obs=None, log_path=None, zlevels=None,
                      registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
                      focus_points=None, focus_range=None, centered_acq=True,
-                     pause_event: Optional[threading.Event] = None):
+                     pause_event: Optional[threading.Event] = None,
+                     paused_event: Optional[threading.Event] = None):
     """
     Start a tiled acquisition task for the given streams (SEM or FM) in order to
     build a complete view of the TEM grid. Needed tiles are first acquired for
@@ -1170,7 +1188,7 @@ def acquireTiledArea(streams, stage, area, overlap=0.2, settings_obs=None, log_p
     task = TiledAcquisitionTask(streams, stage, area, overlap, settings_obs, log_path, future=future, zlevels=zlevels,
                                 registrar=registrar, weaver=weaver, focusing_method=focusing_method,
                                 focus_points=focus_points, focus_range=focus_range, centered_acq=centered_acq,
-                                pause_event=pause_event)
+                                pause_event=pause_event, paused_event=paused_event)
     future.task_canceller = task._cancelAcquisition  # let the future cancel the task
     # Estimate memory and check if it's sufficient to decide on running the task
     mem_sufficient, mem_est = task.estimateMemory()

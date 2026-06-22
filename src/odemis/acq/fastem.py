@@ -1016,16 +1016,21 @@ class OverviewAcquisition(object):
     def __init__(self, future: model.ProgressiveFuture) -> None:
         self._sub_future = model.ProgressiveFuture()
         self._pause_event = threading.Event()
+        self._is_paused_event = threading.Event()
         self._pause_start_time: Optional[float] = None
         self._pause_lock = threading.Lock()
         self._future = future
         self._future.task_canceller = self._cancel_acquisition
         self._future.task_pauser = self._pause_acquisition
         self._future.task_resumer = self._resume_acquisition
+        # Exposed on the future so the GUI can wait for the actual pause to take effect. TODO update
+        self._future.is_paused_event = self._is_paused_event
 
     def _cancel_acquisition(self, future) -> bool:
         self._sub_future.cancel()
         self._pause_event.clear()
+        # Unblock any thread waiting for the pause to take effect.
+        self._is_paused_event.set()
         with self._pause_lock:
             self._pause_start_time = None
         return True
@@ -1156,7 +1161,8 @@ class OverviewAcquisition(object):
         self._sub_future = stitching.acquireTiledArea([stream], stage, area, overlap, registrar=REGISTER_IDENTITY,
                                                       focusing_method=FocusingMethod.NONE, weaver=WEAVER_COLLAGE,
                                                       log_path=file_pattern, centered_acq=centered_acq,
-                                                      pause_event=self._pause_event)
+                                                      pause_event=self._pause_event,
+                                                      paused_event=self._is_paused_event)
         self._sub_future.add_update_callback(_pass_future_progress)
 
         das = []
