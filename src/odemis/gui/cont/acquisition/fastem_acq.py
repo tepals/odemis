@@ -467,11 +467,12 @@ class FastEMOverviewAcquiController(object):
             )
             f.add_done_callback(partial(self.on_acquisition_done, num=num))
             self._overview_future = f
-            acq_futures[f] = f.start_time - f.end_time
-            self.acq_future = model.ProgressiveBatchFuture(acq_futures)
-            self.acq_future.add_done_callback(self.full_acquisition_done)
+            # TODO check if the ProgressiveBatchFuture is needed here, or if a ProgressiveFuture is enough
+            # acq_futures[f] = f.start_time - f.end_time
+            # self.acq_future = model.ProgressiveBatchFuture(acq_futures)
+            self._overview_future.add_done_callback(self.full_acquisition_done)
             self._fs_connector = ProgressiveFutureConnector(
-                self.acq_future, self.gauge_acq, self.lbl_acqestimate
+                self._overview_future, self.gauge_acq, self.lbl_acqestimate
             )
         except Exception:
             logging.exception("Failed to start overview acquisition")
@@ -483,13 +484,13 @@ class FastEMOverviewAcquiController(object):
         """
         Called during acquisition when pressing the cancel button
         """
-        if not self.acq_future:
+        if not self._overview_future:
             msg = "Tried to cancel acquisition while it was not started"
             logging.warning(msg)
             self._reset_acquisition_gui()
             return
 
-        self.acq_future.cancel()
+        self._overview_future.cancel()
         self.btn_pause.Enable(False)
         fastem._executor.cancel()
         # all the rest will be handled by on_acquisition_done()
@@ -1147,6 +1148,7 @@ class FastEMMultiBeamAcquiController(object):
         self.bmp_acq_status_warn = self._tab_panel.bmp_acq_status_warn
         self.bmp_acq_status_info = self._tab_panel.bmp_acq_status_info
         self.acq_future = None  # ProgressiveBatchFuture
+        self.acq_future_for_pausing = None  # ProgressiveFuture
         self._fs_connector = None  # ProgressiveFutureConnector
         self.save_full_cells = model.BooleanVA(
             False
