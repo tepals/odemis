@@ -25,6 +25,7 @@ import unittest
 from pathlib import Path
 
 import numpy
+from matplotlib import pyplot as plt
 
 from odemis import model
 from odemis.dataio import hdf5
@@ -35,6 +36,25 @@ from odemis.util.img import RGB2Greyscale, ensure2DImage
 logging.getLogger().setLevel(logging.DEBUG)
 
 TEST_IMAGE_PATH = Path(__file__).parent
+
+
+class TestFigureConversion(unittest.TestCase):
+    """Test conversion of Matplotlib figures to RGB arrays."""
+
+    def test_figure2data(self) -> None:
+        """Test that converting a figure returns a detached RGB array."""
+        figure = plt.figure(figsize=(4, 3), dpi=10)
+        try:
+            result = angleres._figure2data(figure)
+            expected = numpy.asarray(figure.canvas.buffer_rgba())[:, :, :3]
+        finally:
+            plt.close(figure)
+
+        self.assertEqual(result.shape, (30, 40, 3))
+        self.assertEqual(result.dtype, numpy.uint8)
+        numpy.testing.assert_array_equal(result, expected)
+        self.assertTrue(result.flags.owndata)
+
 
 class TestAngleResolvedDataConversion(unittest.TestCase):
     """
