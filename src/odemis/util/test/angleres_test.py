@@ -36,7 +36,6 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 TEST_IMAGE_PATH = Path(__file__).parent
 
-
 class TestAngleResolvedDataConversion(unittest.TestCase):
     """
     Test AngleResolved2Polar, AngleResolved2Rectangular and Rectangular2Polar.
