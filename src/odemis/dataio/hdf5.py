@@ -140,27 +140,27 @@ def _create_image_dataset(group, dataset_name, image, **kwargs):
     assert(len(image.shape) >= 2)
     image_dataset = group.create_dataset(dataset_name, data=image, **kwargs)
 
-    # numpy.string_ is to force fixed-length string (necessary for compatibility)
+    # numpy.bytes_ is to force fixed-length string (necessary for compatibility)
     # FIXME: needs to be NULLTERM, not NULLPAD... but h5py doesn't allow to distinguish
-    image_dataset.attrs["CLASS"] = numpy.string_("IMAGE")
+    image_dataset.attrs["CLASS"] = numpy.bytes_("IMAGE")
     # Colour image?
     if image.ndim == 3 and (image.shape[-3] == 3 or image.shape[-1] == 3):
         # TODO: check dtype is int?
-        image_dataset.attrs["IMAGE_SUBCLASS"] = numpy.string_("IMAGE_TRUECOLOR")
-        image_dataset.attrs["IMAGE_COLORMODEL"] = numpy.string_("RGB")
+        image_dataset.attrs["IMAGE_SUBCLASS"] = numpy.bytes_("IMAGE_TRUECOLOR")
+        image_dataset.attrs["IMAGE_COLORMODEL"] = numpy.bytes_("RGB")
         if image.shape[-3] == 3:
             # Stored as [pixel components][height][width]
-            image_dataset.attrs["INTERLACE_MODE"] = numpy.string_("INTERLACE_PLANE")
+            image_dataset.attrs["INTERLACE_MODE"] = numpy.bytes_("INTERLACE_PLANE")
         else: # This is the numpy standard
             # Stored as [height][width][pixel components]
-            image_dataset.attrs["INTERLACE_MODE"] = numpy.string_("INTERLACE_PIXEL")
+            image_dataset.attrs["INTERLACE_MODE"] = numpy.bytes_("INTERLACE_PIXEL")
     else:
-        image_dataset.attrs["IMAGE_SUBCLASS"] = numpy.string_("IMAGE_GRAYSCALE")
+        image_dataset.attrs["IMAGE_SUBCLASS"] = numpy.bytes_("IMAGE_GRAYSCALE")
         image_dataset.attrs["IMAGE_WHITE_IS_ZERO"] = numpy.array(0, dtype="uint8")
         image_dataset.attrs["IMAGE_MINMAXRANGE"] = [image.min(), image.max()]
 
-    image_dataset.attrs["DISPLAY_ORIGIN"] = numpy.string_("UL") # not rotated
-    image_dataset.attrs["IMAGE_VERSION"] = numpy.string_("1.2")
+    image_dataset.attrs["DISPLAY_ORIGIN"] = numpy.bytes_("UL") # not rotated
+    image_dataset.attrs["IMAGE_VERSION"] = numpy.bytes_("1.2")
 
     return image_dataset
 
