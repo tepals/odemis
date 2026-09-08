@@ -587,7 +587,7 @@ def Rectangular2Polar(data, output_size, colormap=None):
     return model.DataArray(result, md)
 
 
-def _figure2data(figure):
+def _figure2data(figure: matplotlib.figure.Figure) -> numpy.ndarray:
     """
     Extracts the data from the figure canvas and stores it in an numpy array.
     :param figure: (matplotlib figure) Figure to extract the data from.
@@ -607,9 +607,7 @@ def _figure2data(figure):
     figure.tight_layout(pad=0)
     figure.canvas.draw()
 
-    w, h = figure.canvas.get_width_height()
-    image = numpy.frombuffer(figure.canvas.tostring_rgb(), dtype=numpy.uint8)
-    image.shape = (h, w, 3)
+    image = numpy.asarray(figure.canvas.buffer_rgba())[:, :, :3].copy()
 
     return image
 
