@@ -53,7 +53,11 @@ class CancellableThreadPoolExecutor(ThreadPoolExecutor):
             if self._shutdown:
                 raise RuntimeError('cannot schedule new futures after shutdown')
 
-            w = _WorkItem(f, fn, args, kwargs)
+            try:
+                w = _WorkItem(f, fn, args, kwargs)
+            except TypeError:
+                # _WorkItem constructor changed in Python 3.11, so we need to use the new signature
+                w = _WorkItem(f, (fn, args, kwargs))
 
             self._work_queue.put(w)
             self._adjust_thread_count()
@@ -179,7 +183,11 @@ class ParallelThreadPoolExecutor(ThreadPoolExecutor):
             self._queue.append(f)
             f.add_done_callback(self._on_done)
 
-            w = _WorkItem(f, fn, args, kwargs)
+            try:
+                w = _WorkItem(f, fn, args, kwargs)
+            except TypeError:
+                # _WorkItem constructor changed in Python 3.11, so we need to use the new signature
+                w = _WorkItem(f, (fn, args, kwargs))
             with self._set_remove:
                 self._waiting_work.appendleft((w, f, dependences))
             self._schedule_work()
