@@ -7757,7 +7757,7 @@ N\x85iM\xfd\x1f\xfb\xdf\xeb\x83\xa5\x1cA\xadf,\xae\x27#\xa1\x8e\x85\xc1\
                           <object class="wxPanel" name="pnl_acq">
                             <bg>#333333</bg>
                             <fg>#7F7F7F</fg>
-                            <size>400,140</size>
+                            <size>400,240</size>
                             <flag>wxTOP|wxEXPAND</flag>
                             <option>1</option>
                           </object>
